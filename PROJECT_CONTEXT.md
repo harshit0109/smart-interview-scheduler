@@ -508,6 +508,49 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   pre-existing warnings), `tsc --noEmit` clean, `next build` OK (24 routes; `admin/interviews/new`
   bundle grew from ~6.3kB to ~8.6kB). `git diff -- backend/app/scheduling/` empty.
 
+- **2026-09-06 — Invitation phase, commit 1: backend `app/invitations/` module.** *Not yet
+  pushed.* No migration (Phase A's `0007` schema was already complete — this commit is the first
+  code that reads/writes `participant_invitations`). New module: `schemas.py` / `repository.py` /
+  `service.py` / two routers in `router.py` — `router` (ADMIN-only, nested
+  `/interviews/{id}/invitations`: `POST` issues-or-resends one invitation per current participant,
+  `GET` lists current invitation state) and `public_router` (unauthenticated, top-level
+  `/invitations/{token}`: `GET`, `POST .../respond`, `POST .../claim-account`).
+  **Design decisions (approved before implementing):** (1) issuance is explicit and ADMIN-only,
+  never automatic on `POST /interviews` — matches the C3/C4 success screen's honest "no invitations
+  sent yet." (2) Resend = calling issuance again; the DB's existing unique `(request_id, user_id)`
+  constraint is the upsert key that rotates the token in place (new hash, new `expires_at`,
+  `send_count += 1`) — no separate resend endpoint. (3) **Token-based response is deliberately
+  decoupled from the authenticated Phase 9 lifecycle** — `respond()` only writes
+  `participant_invitations.status/responded_at/response_reason` and mirrors the same value onto
+  `interview_participants.response_status`; it never calls `lifecycle.decline()`, cancels a
+  booking, or re-triggers recommendations. That cascade is a later phase's decision, not this one.
+  (4) Claiming an account (`POST .../claim-account`, sets `password_hash` for a
+  `requires_account_setup` user, returns a `TokenPair`) is independent of responding — either can
+  happen without the other, both gated only on the token being valid and not expired.
+  **Token handling:** `secrets.token_urlsafe(32)` generated in `service.py`, hashed with
+  `hashlib.sha256` before the first DB write; the raw value exists only in memory, the one-time
+  `invite_url` in the issuance API response, and the outbound email body — asserted never to reach
+  a log line or `audit_logs.metadata` (`test_no_raw_token_leaks_into_audit_or_logs`, following the
+  same pattern as Phase B's `test_audit_and_logs_carry_no_secrets`). Delivery status
+  (SENT/SIMULATED/FAILED) is written onto `participant_invitations.delivery_status` — deliberately
+  **not** `notification_logs`, per the Phase A model docstring's own note that invitation delivery
+  state lives on its own table. Expiry (`invitation_ttl_hours` = 168) is lazy: `GET`/`respond`/
+  `claim-account` flip a past-due `PENDING` row to `EXPIRED` on read, no cron job.
+  **Rate limiting:** new `INVITE` tier (`rate_limit_invite_per_minute` = 10) for the ADMIN
+  issuance/resend route; the three public token routes added to the existing `STRICT` tier.
+  **Verified:** `ruff` clean; new `tests/test_invitations.py` 20/20 passing (issuance,
+  one-row-per-participant, resend rotation + old-token-dead, candidate+panelists both included,
+  SENT/SIMULATED/FAILED delivery, admin-only list, public GET, respond for all three response
+  values, double-response rejected, expiry rejected on respond but shown (not errored) on GET,
+  claim sets password and enables `POST /auth/login`, claim rejected when already claimed or not
+  required, decline-then-claim still succeeds, no-secret-leak assertion, both new rate-limit
+  tiers). Regression: `test_interviews.py` (17), `test_bootstrap_admin.py`/`test_provisioning.py`
+  (34 combined), `test_rate_limit.py`/`test_notifications.py` (26 combined),
+  `test_booking.py`/`test_lifecycle.py`/`test_self_service.py` (33 combined) — all still green.
+  `git diff -- backend/app/scheduling/` empty; alembic head still `0007`.
+  **Deferred to commit 2 (frontend):** `app/invite/[token]/page.tsx`, admin "Send Invitations"
+  trigger UI, `invitationsApi`/types in the frontend.
+
 ---
 
 ## 6. In progress / next immediate task
@@ -536,12 +579,13 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   Google Identity login end-to-end, `docker-compose` frontend service, real end-to-end demo
   against a live Google account, green CI run.
 - **In progress (new track):** Phases A (invitation schema), B (user provisioning + bootstrap
-  ADMIN), C (admin RBAC + misleading-UI fixes), and C3/C4 (interview-creation wizard rebuild +
-  `title` wired into the API) are committed locally on `main` (`6ddc1dd`, `21fe1f8`, plus the Phase
-  C and C3/C4 commits — see log), **not yet pushed**. Migration head still `0007`.
-  **Next:** invitation token issuance/dispatch, `POST /interviews/{id}/invitations`,
-  `/invite/[token]`, and accept/decline/reschedule/unavailable response handling — the dedicated
-  invitation phase. Scheduling engine remains frozen throughout.
+  ADMIN), C (admin RBAC + misleading-UI fixes), C3/C4 (interview-creation wizard rebuild +
+  `title` wired into the API), and the invitation phase's backend commit (`app/invitations/`) are
+  committed locally on `main` (`6ddc1dd`, `21fe1f8`, plus the Phase C, C3/C4, and invitation-backend
+  commits — see log), **not yet pushed**. Migration head still `0007`.
+  **Next:** invitation phase commit 2 (frontend) — `app/invite/[token]/page.tsx`, an admin "Send
+  Invitations" trigger on the interview-detail page, `invitationsApi`/types in
+  `lib/api-client.ts`/`lib/types.ts`. Scheduling engine remains frozen throughout.
 
 ---
 

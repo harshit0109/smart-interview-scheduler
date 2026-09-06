@@ -19,6 +19,8 @@ from app.core.errors import register_exception_handlers
 from app.core.ratelimit import RateLimitMiddleware
 from app.core.redis import redis_client
 from app.interviews.router import router as interviews_router
+from app.invitations.router import public_router as invitations_public_router
+from app.invitations.router import router as invitations_router
 from app.scheduling.router import router as scheduling_router
 from app.users.router import router as users_router
 
@@ -40,6 +42,8 @@ app.add_middleware(RateLimitMiddleware)
 app.include_router(auth_router, prefix=API_V1)
 app.include_router(users_router, prefix=API_V1)
 app.include_router(interviews_router, prefix=API_V1)
+app.include_router(invitations_router, prefix=API_V1)
+app.include_router(invitations_public_router, prefix=API_V1)
 app.include_router(availability_router, prefix=API_V1)
 app.include_router(calendar_router, prefix=API_V1)
 app.include_router(scheduling_router, prefix=API_V1)

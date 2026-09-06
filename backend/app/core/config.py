@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     rate_limit_standard_per_minute: int = 60  # all other authenticated endpoints
     rate_limit_recommendations_per_minute: int = 5  # Google Free/Busy amplification
     rate_limit_booking_per_minute: int = 10  # Google event create/delete + lock + txn
+    rate_limit_invite_per_minute: int = 10  # invitation issuance/resend (real email sends)
+
+    # Invitations (participant_invitations, migration 0007). The raw token is
+    # never stored — only SHA-256(token). This is how long an issued/resent
+    # token stays valid before a GET/respond/claim lazily marks it EXPIRED.
+    invitation_ttl_hours: int = 168  # 7 days
 
 
 settings = Settings()

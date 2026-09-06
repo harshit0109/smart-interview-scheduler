@@ -6,6 +6,7 @@ Spec: API_DESIGN.md §Rate Limiting + DB_DESIGN.md §Redis Design.
   STANDARD 60/min  every other authenticated endpoint
   REC       5/min  POST /interviews/{id}/recommendations   (Google Free/Busy amplification)
   BOOK     10/min  POST /interviews/{id}/{book,reschedule,decline,cancel}
+  INVITE   10/min  POST /interviews/{id}/invitations       (issuance/resend, real email sends)
 
 Fixed-window counter via one atomic Lua script (INCR + first-hit EXPIRE) — O(1)
 and correct across multiple backend instances (single Redis authority).
@@ -61,6 +62,13 @@ _RULES: list[tuple[str, re.Pattern[str], str, str]] = [
      "rate_limit_recommendations_per_minute"),
     ("POST", re.compile(r"/interviews/[^/]+/(book|reschedule|decline|cancel)"), "book",
      "rate_limit_booking_per_minute"),
+    ("POST", re.compile(r"/interviews/[^/]+/invitations"), "invite",
+     "rate_limit_invite_per_minute"),
+    ("GET", re.compile(r"/invitations/[^/]+"), "strict", "rate_limit_strict_per_minute"),
+    ("POST", re.compile(r"/invitations/[^/]+/respond"), "strict",
+     "rate_limit_strict_per_minute"),
+    ("POST", re.compile(r"/invitations/[^/]+/claim-account"), "strict",
+     "rate_limit_strict_per_minute"),
     ("POST", re.compile(r"/interviews/[^/]+/candidate-availability"), "strict",
      "rate_limit_strict_per_minute"),
     ("GET", re.compile(r"/interviews/[^/]+/availability"), "strict",

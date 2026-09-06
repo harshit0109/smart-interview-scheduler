@@ -176,6 +176,36 @@ class AdminAlreadyExistsError(AppError):
     message = "An administrator account already exists. Bootstrap is disabled."
 
 
+class InvitationNotFoundError(AppError):
+    status_code = 404
+    code = "INVITATION_NOT_FOUND"
+    message = "This invitation link is invalid."
+
+
+class InvitationExpiredError(AppError):
+    status_code = 409
+    code = "INVITATION_EXPIRED"
+    message = "This invitation has expired. Ask the recruiter to resend it."
+
+
+class InvitationAlreadyRespondedError(AppError):
+    status_code = 409
+    code = "INVITATION_ALREADY_RESPONDED"
+    message = "This invitation has already been responded to."
+
+
+class AccountAlreadyClaimedError(AppError):
+    status_code = 409
+    code = "ACCOUNT_ALREADY_CLAIMED"
+    message = "This account already has a password set. Please log in instead."
+
+
+class AccountSetupNotRequiredError(AppError):
+    status_code = 409
+    code = "ACCOUNT_SETUP_NOT_REQUIRED"
+    message = "This invitation does not require account setup."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {
