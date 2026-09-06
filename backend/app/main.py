@@ -1,7 +1,7 @@
 """FastAPI application entrypoint.
 
-Phase 1 (Foundation & Infrastructure): an empty app exposing only an
-infrastructure health check. No business logic, no auth, no domain routes.
+Infra `GET /health` (unversioned) + the versioned `/api/v1` API. Domain modules
+are mounted as they are built, phase by phase.
 """
 
 import logging
@@ -10,10 +10,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.auth.router import router as auth_router
 from app.core.db import engine
+from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
+from app.users.router import router as users_router
 
 logger = logging.getLogger(__name__)
+
+API_V1 = "/api/v1"
 
 
 @asynccontextmanager
@@ -24,6 +29,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Smart Interview Scheduler", version="0.1.0", lifespan=lifespan)
+register_exception_handlers(app)
+app.include_router(auth_router, prefix=API_V1)
+app.include_router(users_router, prefix=API_V1)
 
 
 async def _check_database() -> str:
