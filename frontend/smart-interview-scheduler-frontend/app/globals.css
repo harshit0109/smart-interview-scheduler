@@ -1,0 +1,34 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  body {
+    @apply bg-workday-surface text-workday-text font-sans antialiased;
+    color-scheme: light;
+  }
+
+  /* Custom enterprise scrollbars */
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #F5F7F8;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #B8C4CE;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #0875E1;
+  }
+}
