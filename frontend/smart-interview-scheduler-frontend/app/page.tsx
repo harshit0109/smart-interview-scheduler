@@ -120,7 +120,7 @@ export default function HomePage() {
           {!isAuthenticated && (
             <Link href="/register">
               <Button variant="outline" size="lg">
-                Create Enterprise Account
+                Create Candidate Account
               </Button>
             </Link>
           )}

@@ -25,6 +25,7 @@ export default function PanelistCalendarPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isConnecting, setIsConnecting] = React.useState(false);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [oauthNotConfigured, setOauthNotConfigured] = React.useState(false);
 
   const fetchStatus = async () => {
     setIsLoading(true);
@@ -46,9 +47,21 @@ export default function PanelistCalendarPage() {
   const handleConnectCalendar = async () => {
     setIsConnecting(true);
     setErrorMsg(null);
+    setOauthNotConfigured(false);
     try {
       const { authorization_url } = await calendarApi.connect();
-      // Directly redirect to backend OAuth URL per specification
+      // The backend doesn't yet validate its Google OAuth client config before
+      // building this URL — an unconfigured deployment returns one with an
+      // empty client_id, which would otherwise send the user to a broken
+      // Google consent screen. Detect that here rather than redirecting.
+      const clientId = new URL(authorization_url, window.location.origin).searchParams.get(
+        "client_id"
+      );
+      if (!clientId) {
+        setIsConnecting(false);
+        setOauthNotConfigured(true);
+        return;
+      }
       window.location.href = authorization_url;
     } catch (err: any) {
       setIsConnecting(false);
@@ -110,6 +123,17 @@ export default function PanelistCalendarPage() {
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800 flex items-center gap-2.5">
           <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
           <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {oauthNotConfigured && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 flex items-center gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            Google Calendar integration hasn&apos;t been configured for this
+            deployment yet. Ask your administrator to set up Google Calendar
+            OAuth before connecting.
+          </span>
         </div>
       )}
 

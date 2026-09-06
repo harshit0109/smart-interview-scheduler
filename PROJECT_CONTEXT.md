@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phases 1–9 complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**.
+**Last updated:** 2026-09-06 — Backend Phases 1–11 (partial, rate limiting) complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**. **New real-world onboarding/invitation architecture started:** Phase A (invitation schema, migration `0007`), Phase B (`POST /users` ADMIN provisioning + `POST /auth/bootstrap-admin` first-ADMIN web setup + `/setup` frontend route), and Phase C (admin RBAC fix + misleading-copy/UI cleanup) are committed locally on `main`, **not yet pushed**. Current migration head: `0007`. Invitation token issuance/dispatch and the interview-creation wizard rebuild are **not yet built** — later phases.
 
 ---
 
@@ -428,6 +428,49 @@ backend/
 
 All MVP + Post-MVP module folders now exist. No new module folders expected before Phase 12.
 
+- **2026-09-06 — Phase A: Invitation schema foundation.** Commit `6ddc1dd`. *Not yet pushed.*
+  Migration `0007` adds `participant_invitations` (token stored only as `SHA-256(raw_token)`,
+  never the raw token; statuses `PENDING/ACCEPTED/DECLINED/UNAVAILABLE/EXPIRED`; delivery
+  `SENT/FAILED/SIMULATED`; one row per `(interview_request_id, user_id)`). Extends
+  `interview_participants.response_status` with `UNAVAILABLE`; adds `interview_requests.title`
+  (nullable, the Job/Role field). No endpoint yet — schema only. Scheduling engine untouched.
+
+- **2026-09-06 — Phase B: User provisioning + first-ADMIN web bootstrap.** Commit `21fe1f8`.
+  *Not yet pushed.* `POST /api/v1/users` (ADMIN-only) provisions an unclaimed CANDIDATE/PANELIST
+  (`password_hash = NULL`); idempotent on matching `(email, role)`, `422 ROLE_CONFLICT` on a role
+  mismatch; ADMIN cannot be provisioned this way. `POST /api/v1/auth/bootstrap-admin` creates the
+  first ADMIN via `X-Bootstrap-Token` (`secrets.compare_digest`, only when zero ADMINs exist,
+  `409 ADMIN_ALREADY_EXISTS` after), STRICT rate-limited. New frontend `/setup` route collects
+  name/email/password/timezone/bootstrap token. `POST /auth/register` unchanged (still public
+  CANDIDATE-only). Full backend suite: 210 passed + 1 skipped. Scheduling engine untouched.
+
+- **2026-09-06 — Phase C: Admin frontend corrections + misleading-UI fixes.** *Not yet pushed.*
+  Frontend-only; no backend/migration/scheduling changes. Fixed: (1) `app/(admin)/admin/layout.tsx`
+  RBAC guard was `allowedRole={["ADMIN","PANELIST"]}` — a real bug letting panelists reach the
+  admin app; narrowed to `"ADMIN"` only. (2) That fix orphaned the panelist sidebar's "Profile" link
+  (previously `/admin/settings`, now correctly blocked) — extracted the role-agnostic settings UI
+  into `components/shared/ProfileSettings.tsx` and added a real `/panelist/settings` route reusing
+  it, rather than pointing at a route that doesn't exist. (3) Registration/login copy said "Create
+  Enterprise Account" implying public admin signup; reworded to "Create Candidate Account" /
+  "Create a candidate account" across `app/page.tsx`, `app/register/page.tsx`, `app/login/page.tsx`,
+  with a login-page note that ADMIN/PANELIST sign in with org-provided credentials. (4) The admin
+  interview-detail panelist list had a **hard-coded** "Calendar Active" badge on every panelist
+  regardless of real status; replaced with a conditional on `panelist.calendar_status` (which the
+  real API adapter already sets `undefined` for — the backend doesn't surface per-panelist calendar
+  status on this endpoint), showing "Calendar status unknown" rather than fabricating "Active".
+  (5) Panelist Google Calendar connect flow: the backend has **no** `CALENDAR_OAUTH_NOT_CONFIGURED`
+  error and doesn't validate its OAuth client config before building `authorization_url` — an
+  unconfigured deployment returns a URL with an empty `client_id`, which would send the panelist to
+  a broken Google consent screen. Detected client-side (empty `client_id` param) and shown as a
+  clear "ask your administrator to configure Google Calendar" notice instead of redirecting.
+  **Discrepancy noted:** the Phase C brief described `CALENDAR_OAUTH_NOT_CONFIGURED` as existing
+  backend behavior; it does not exist in `backend/app/core/errors.py` or `app/calendar/`. Adding it
+  server-side was out of scope for this frontend-only phase — flagged here for whoever picks up
+  invitation dispatch or calendar hardening next.
+  **Verified:** `next lint` clean (only the 3 pre-existing `exhaustive-deps` warnings), `tsc --noEmit`
+  clean, `next build` OK (23 routes, `/panelist/settings` new). `git diff -- backend/app/scheduling/`
+  empty. No backend files touched.
+
 ---
 
 ## 6. In progress / next immediate task
@@ -455,6 +498,14 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   Phase 12 (docs + bonus). Also open:
   Google Identity login end-to-end, `docker-compose` frontend service, real end-to-end demo
   against a live Google account, green CI run.
+- **In progress (new track):** Phases A (invitation schema), B (user provisioning + bootstrap
+  ADMIN), and C (admin RBAC + misleading-UI fixes) are committed locally on `main`
+  (`6ddc1dd`, `21fe1f8`, Phase C commit — see log), **not yet pushed**. Migration head `0007`.
+  This round of Phase C covered only RBAC + misleading-copy/UI fixes (see the Phase C entry
+  above); the interview-creation wizard rebuild (provisioning candidates/panelists inline via
+  `POST /users`) is explicitly **not yet done** and is the next approved chunk of work, followed by
+  invitation token issuance/dispatch and the public accept/decline/reschedule pages. Scheduling
+  engine remains frozen throughout.
 
 ---
 

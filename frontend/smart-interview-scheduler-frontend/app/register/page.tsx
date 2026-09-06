@@ -80,7 +80,7 @@ export default function RegisterPage() {
           </span>
         </Link>
         <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-          Create enterprise account
+          Create candidate account
         </h2>
         <p className="mt-1 text-xs text-slate-500">
           Already registered?{" "}

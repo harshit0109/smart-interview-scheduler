@@ -233,10 +233,16 @@ export default function AdminInterviewDetailPage() {
                   <p className="text-slate-500">{pan.email} • {pan.timezone || "UTC"}</p>
                 </div>
                 <div>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                    <CalendarCheck className="w-3 h-3 text-emerald-600" />
-                    Calendar Active
-                  </span>
+                  {pan.calendar_status === "CONNECTED" ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <CalendarCheck className="w-3 h-3 text-emerald-600" />
+                      Calendar Connected
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                      Calendar status unknown
+                    </span>
+                  )}
                 </div>
               </div>
             ))}

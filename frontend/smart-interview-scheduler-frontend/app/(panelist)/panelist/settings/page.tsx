@@ -2,6 +2,6 @@
 
 import { ProfileSettings } from "@/components/shared/ProfileSettings";
 
-export default function SettingsPage() {
+export default function PanelistSettingsPage() {
   return <ProfileSettings />;
 }

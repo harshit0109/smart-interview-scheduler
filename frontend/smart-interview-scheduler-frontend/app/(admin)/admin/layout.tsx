@@ -10,7 +10,7 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   return (
-    <RoleGuard allowedRole={["ADMIN","PANELIST"]}>
+    <RoleGuard allowedRole="ADMIN">
       <AppShell
         title="Admin Workspace"
         breadcrumbs={[{ label: "Admin", href: "/admin" }]}

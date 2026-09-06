@@ -179,14 +179,19 @@ function LoginForm() {
             </Button>
           </form>
 
-          <div className="pt-2 text-center text-xs text-slate-500">
-            Don&apos;t have an account?{" "}
-            <Link
-              href="/register"
-              className="text-workday-blue font-semibold hover:underline"
-            >
-              Create enterprise account
-            </Link>
+          <div className="pt-2 text-center text-xs text-slate-500 space-y-1">
+            <p>
+              Candidate?{" "}
+              <Link
+                href="/register"
+                className="text-workday-blue font-semibold hover:underline"
+              >
+                Create a candidate account
+              </Link>
+            </p>
+            <p className="text-slate-400">
+              Administrators and panelists sign in with credentials provided by their organization.
+            </p>
           </div>
         </div>
       </div>
