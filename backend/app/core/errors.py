@@ -92,6 +92,42 @@ class RequestNotAwaitingAvailabilityError(AppError):
     message = "This interview request is not awaiting candidate availability."
 
 
+class NotReadyForSchedulingError(AppError):
+    status_code = 409
+    code = "NOT_READY_FOR_SCHEDULING"
+    message = "This interview request is not ready for scheduling."
+
+
+class PanelistCalendarNotConnectedError(AppError):
+    status_code = 424
+    code = "PANELIST_CALENDAR_NOT_CONNECTED"
+    message = "A required panelist has not connected their Google Calendar."
+
+
+class CalendarConnectionRevokedError(AppError):
+    status_code = 424
+    code = "CALENDAR_CONNECTION_REVOKED"
+    message = "A required panelist's Google Calendar connection has been revoked."
+
+
+class CalendarConnectionExpiredError(AppError):
+    status_code = 424
+    code = "CALENDAR_CONNECTION_EXPIRED"
+    message = "A required panelist's Google Calendar connection has expired."
+
+
+class NoCommonAvailabilityError(AppError):
+    status_code = 422
+    code = "NO_COMMON_AVAILABILITY"
+    message = "No time slot works for every participant."
+
+
+class CalendarSyncFailedError(AppError):
+    status_code = 502
+    code = "CALENDAR_SYNC_FAILED"
+    message = "Could not retrieve calendar availability from Google. Please retry."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {

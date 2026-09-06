@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 4 (Candidate Availability) complete and committed (`54508b3`). Phase 5 (Scheduling Engine — pure) implemented, verified, awaiting commit approval.
+**Last updated:** 2026-09-06 — Backend Phase 5 (Scheduling Engine — pure) complete and committed (`12d8f19`). Phase 6 (Calendar Integration & Scheduling Service) implemented, verified, awaiting commit approval.
 
 ---
 
@@ -155,8 +155,7 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
   - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 55 passed;
     `docker compose build backend` → `/health` ok, both new routes present.
 
-- **2026-09-06 — Backend Phase 5: Scheduling Engine (pure business logic).**
-  *Awaiting commit approval.*
+- **2026-09-06 — Backend Phase 5: Scheduling Engine (pure business logic).** Commit `12d8f19`.
   - `backend/app/scheduling/` — **pure, zero I/O** (stdlib only; `test_engine_purity.py` enforces
     no `sqlalchemy`/`redis`/`httpx`/`fastapi`/Google/`app.*`-outside-`scheduling` imports, no
     `datetime.now()`, no `random`):
@@ -177,9 +176,43 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
   - `backend/scripts/engine_demo.py` — `python -m scripts.engine_demo`, fixed synthetic 3-participant
     input + fixed `reference_time`, prints ranked/scored/explained slots.
   - **No** migration, **no** endpoint, **no** dependency, **no** `main.py` change.
-  - **Verified:** `ruff` clean; `pytest` 94 passed (39 new: `test_engine`, `test_scoring`,
-    `test_engine_purity`); demo prints 3 ranked slots deterministically; `docker compose build
-    backend` → `/health` ok, route list unchanged (10).
+  - **Verified:** `ruff` clean; `pytest` 94 passed; demo prints 3 ranked slots deterministically.
+
+- **2026-09-06 — Backend Phase 6: Calendar Integration & Scheduling Service.**
+  *Awaiting commit approval.*
+  - `backend/app/calendar/` — the **separate** Calendar OAuth flow (never merged with login):
+    `client.py` (single async-`httpx` Google seam: `authorization_url` / `exchange_code` /
+    `refresh` / `free_busy` + 3-try exp-backoff on transport/5xx/429; `invalid_grant`/401 →
+    `CalendarAuthError`, no retry), `service.py` (connect-URL + signed state, callback exchange →
+    **encrypt** + upsert + `audit_logs("CALENDAR_CONNECTED")`, `get_status`, `ensure_usable`
+    = silent refresh on `EXPIRED`/near-expiry → `REVOKED` on failed refresh, `get_free_busy` with
+    Redis `freebusy:{uid}:{hash}` 15-min cache), `repository.py`, `schemas.py`, `router.py`
+    (`POST /calendar/connect` [ADMIN|PANELIST], `GET /calendar/callback` [signed state; 302 to
+    `${FRONTEND_BASE_URL}/calendar/(connected|error)`], `GET /calendar/status` [ADMIN|PANELIST]).
+  - `backend/app/core/crypto.py` — Fernet `encrypt`/`decrypt` for tokens at rest. Sentinel key
+    `"dev"` derives a throwaway local key; **`environment=production` + no real key → refuses**
+    (`TokenCryptoError`).
+  - `backend/app/scheduling/` gained the layer files around the frozen engine: `service.py`
+    (`generate()` — status gate → resolve panelist connections → free/busy → build `EngineInput`
+    with `reference_time = now(UTC)` and `existing_bookings = {}` → call engine → persist +
+    transition + audit; drops/clips windows that passed while the request waited), `repository.py`
+    (`recommendation_runs` / `recommended_slots`), `router.py` (`POST /interviews/{id}/
+    recommendations` [ADMIN]), `schemas.py`.
+  - `models.py`: `RecommendationRun`, `RecommendedSlot`. `errors.py`: `NotReadyForSchedulingError`
+    (409), `PanelistCalendarNotConnectedError` / `CalendarConnectionRevokedError` /
+    `CalendarConnectionExpiredError` (424), `NoCommonAvailabilityError` (422),
+    `CalendarSyncFailedError` (502). `security.py`: `create_calendar_state_token` +
+    `TokenType` gains `"calendar_state"`. `config.py`: `google_calendar_oauth_*`,
+    `calendar_token_encryption_key`, `frontend_base_url`, `calendar_state_ttl_seconds`.
+  - `GET /interviews/{id}` now includes `recommended_slots` (latest run) for ADMIN + the owning
+    candidate (D-5 / resolves G3 — via the frozen endpoint, no new GET route invented).
+  - Migration `0004` (`recommendation_runs`, `recommended_slots`). New deps: `httpx` (→ prod),
+    `cryptography`.
+  - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 116 passed + 1 skipped
+    (`test_calendar` 13, `test_recommendations` 9; sandbox test `skipif`-gated); `docker compose
+    build backend` → `/health` ok, 14 routes. Token-exposure review: `decrypt()` output only ever
+    passed to the client seam; no tokens in any schema, log, audit row, or `input_snapshot`
+    (asserted).
 
 ### Current backend structure
 
@@ -191,47 +224,49 @@ backend/
 │   ├── users/             # GET /users/me
 │   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
 │   ├── availability/      # POST/GET candidate availability (nested under /interviews/{id})
-│   ├── scheduling/        # PURE engine: types / engine / scoring / explain (no I/O; Phase 6 adds router/service/repo)
+│   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy (client seam, encrypted tokens)
+│   ├── scheduling/        # PURE engine (types/engine/scoring/explain) + Phase 6 layer (service/repository/router/schemas)
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
-│       ├── models.py      # User, CalendarConnection, InterviewRequest,
-│       │                  #   InterviewParticipant, CandidateAvailability,
-│       │                  #   AvailabilityWindow, AuditLog
-│       ├── security.py    # bcrypt + JWT
+│       ├── models.py      # User, CalendarConnection, InterviewRequest, InterviewParticipant,
+│       │                  #   CandidateAvailability, AvailabilityWindow, AuditLog,
+│       │                  #   RecommendationRun, RecommendedSlot
+│       ├── security.py    # bcrypt + JWT (+ calendar_state token)
+│       ├── crypto.py      # Fernet encrypt/decrypt for OAuth tokens at rest
 │       ├── deps.py        # get_current_user, require_role()
 │       ├── errors.py      # typed errors + global handler
 │       ├── pagination.py  # Page[T] + page_params
 │       ├── audit.py       # record_audit()
 │       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
-├── migrations/            # Alembic (env.py + versions/0001..0003)
+├── migrations/            # Alembic (env.py + versions/0001..0004)
 ├── scripts/  (seed.py, engine_demo.py)
 ├── tests/  (test_health, test_security, test_auth, test_rbac, test_interviews,
-│            test_availability, test_engine, test_scoring, test_engine_purity)
+│            test_availability, test_engine, test_scoring, test_engine_purity,
+│            test_calendar, test_recommendations, test_calendar_sandbox [skipif])
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
 Remaining module folders (`booking/`, `notifications/`, …) arrive with their phase,
-per `CODING_GUIDELINES.md` §Modular design. `scheduling/` currently holds only the
-pure engine; its `router.py`/`service.py`/`repository.py` arrive in Phase 6.
+per `CODING_GUIDELINES.md` §Modular design.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 5 — Scheduling Engine (pure)** — implemented and verified locally,
-  awaiting commit approval. `app/scheduling/{types,engine,scoring,explain}.py` + `scripts/
-  engine_demo.py` + 3 test files. No migration, no endpoint, no dependency.
-- **Phase 5 decisions taken (see §7):** `types.py` allowed as a 4th engine file (D-A);
-  `existing_bookings: dict[participant_id, list[datetime]]`, bucketed by panelist-local day
-  (D-B / resolves G1); the five §8 scoring formulas exactly as planned (D-C); explicit
-  `EngineInput.reference_time` — engine never calls `datetime.now()` (D-D); plain
-  `SchedulingEngineError(Exception)` in the package, no fastapi / `app.core` HTTP errors (D-E);
-  demo at `backend/scripts/engine_demo.py` (D-F). Buffer required on **both** sides of a slot
-  (`duration + 2×buffer`), per §8's "both sides" wording.
-- **Next:** Phase 6 — Google Calendar Integration & Scheduling Service. **Do not start until
-  Phase 5 is committed and frozen.** Resolve **G3** and **G7** before/at Phase 6.
+- **In progress:** **Phase 6 — Calendar Integration & Scheduling Service** — implemented and
+  verified locally, awaiting commit approval. `app/calendar/` (OAuth connect flow + free/busy),
+  `app/core/crypto.py`, `app/scheduling/{service,repository,router,schemas}.py`, migration `0004`,
+  `GET /interviews/{id}` now carries `recommended_slots`. New deps `httpx` + `cryptography`.
+- **Phase 6 decisions taken (see §7):** D-1 httpx + Fernet, single `client.py` seam; D-2 offline
+  tests via injected fake + `skipif` sandbox test; D-3 `502 CALENDAR_SYNC_FAILED`, request stays
+  `READY_FOR_SCHEDULING`; D-4 `now(UTC)` + `existing_bookings={}` only in the Service; D-5 the
+  frozen `GET /interviews/{id}` carries `recommended_slots` (no new GET route — resolves G3);
+  D-6 signed JWT `type="calendar_state"`, 5-min TTL; D-7 `/calendar/(connected|error)` redirects;
+  D-8 dev key sentinel + production refusal; D-9 no dev-only event creation; D-10 `app/calendar/`.
+- **Next:** Phase 7 — Booking & Conflict Prevention (**the MVP Acceptance Gate**). **Do not start
+  until Phase 6 is committed.**
 
 **MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
 interview scheduling loop from request creation to real Calendar booking."* — **not yet passed.**
@@ -243,6 +278,30 @@ No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 6)** — Calendar integration & the Scheduling Service. **D-1:** Google HTTP is
+  `httpx` (async) behind one seam, `app/calendar/client.py`; OAuth tokens are Fernet-encrypted
+  (`app/core/crypto.py`). **D-2:** every automated test injects a fake client; `test_calendar_
+  sandbox.py` is `skipif`-gated on real sandbox creds and never runs in CI. **D-3:** a free/busy
+  fetch that fails after retries → `502 CALENDAR_SYNC_FAILED`; the request stays
+  `READY_FOR_SCHEDULING` (requirements.md §13). **D-4:** `datetime.now(UTC)` enters only in
+  `app/scheduling/service.py` (as `EngineInput.reference_time`); `existing_bookings = {}` until
+  Phase 7. **D-5 (resolves G3):** `GET /interviews/{id}` carries `recommended_slots` (latest run)
+  for ADMIN + the owning candidate — the frozen API_DESIGN routes recommendation viewing through
+  this endpoint, so no new GET route was added. **D-6:** OAuth `state` is a signed JWT with
+  `type="calendar_state"`, 5-minute TTL, distinct from access/refresh tokens. **D-7:** callback
+  redirects to `${FRONTEND_BASE_URL}/calendar/connected` | `/calendar/error`. **D-8:**
+  `CALENDAR_TOKEN_ENCRYPTION_KEY` sentinel `"dev"` derives a throwaway local key; with
+  `environment=production` and no real key the app refuses (`TokenCryptoError`). **D-9:** no
+  dev-only Calendar event creation — event creation is entirely Phase 7. **D-10:** module folder is
+  `app/calendar/` per CODING_GUIDELINES (absolute imports; nothing imports stdlib `calendar`).
+  **G7 resolved:** `GET /calendar/status` is folded into Phase 6. The three terminal `424`s on
+  `POST .../recommendations` are kept distinct per API_DESIGN.md / §9d: `PANELIST_CALENDAR_NOT_
+  CONNECTED` (no grant), `CALENDAR_CONNECTION_REVOKED` (Google rejected the refresh token),
+  `CALENDAR_CONNECTION_EXPIRED` (grant lapsed with **no refresh token to retry** — the one path
+  that surfaces `EXPIRED`; a refreshable lapsed access token is refreshed silently and never
+  shown). The Service also drops candidate availability windows that wholly passed while the
+  request waited, and clips an in-progress window to `reference_time` (the engine rejects any
+  past-start window) — Service-layer normalization, not an engine change.
 - **2026-09-06 (Phase 5)** — Scheduling Engine layout & contracts. **D-A:** the engine package is
   `types.py` + `engine.py` + `scoring.py` + `explain.py` (the IMPLEMENTATION.md "and nothing else"
   is read as "no Service/Router/Repo/migration", not "no data-definition module"). **D-B (resolves
@@ -333,10 +392,9 @@ silently** — each item is resolved with Harshit before the phase it affects.
 - **G1 (Phase 5) — RESOLVED 2026-09-06 (D-B).** `EngineInput.existing_bookings:
   dict[participant_id, list[datetime]]`, bucketed by panelist-local day. Phase 6's Service
   populates it from `interview_events` (empty until the table exists in Phase 7). See §7.
-- **G3 (Phase 6 / frontend integration):** `requirements.md` §4 grants CANDIDATE read-only viewing
-  of `score_breakdown`, but `POST /recommendations` is ADMIN-only and `GET /interviews/{id}` only
-  promises a "summary". Decide whether `GET /interviews/{id}` returns full `recommended_slots` for
-  the owning candidate, or add a read endpoint.
+- **G3 (Phase 6) — RESOLVED 2026-09-06 (D-5).** `GET /interviews/{id}` returns the latest run's
+  full `recommended_slots` for ADMIN + the owning candidate (panelists: `null`). No separate read
+  endpoint — API_DESIGN.md already routes this through `GET /interviews/{id}`. See §7.
 
 ### Non-critical — resolve when relevant
 
@@ -346,8 +404,7 @@ silently** — each item is resolved with Harshit before the phase it affects.
 - **G6 — HANDLED (Phase 4).** MVP allows one submission; the `AWAITING_CANDIDATE_AVAILABILITY`
   state gate enforces it. `repository.get_latest()` already sorts by `submitted_at` desc, so the
   Post-MVP re-submission flow (Phase 9) is a state-machine change only.
-- **G7:** `GET /calendar/status` is not listed under any `IMPLEMENTATION.md` phase — fold into
-  Phase 6.
+- **G7 — RESOLVED 2026-09-06.** `GET /calendar/status` implemented as part of Phase 6.
 - **G8 — HANDLED (Phase 4).** `AVAILABILITY_HORIZON_DAYS = 21` in `app/availability/schemas.py`;
   the Phase 5 Scheduling Proximity `horizon_days` (~14) will be a separate, separately-named
   constant in the engine module.

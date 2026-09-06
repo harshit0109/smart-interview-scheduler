@@ -13,7 +13,7 @@ import jwt
 
 from app.core.config import settings
 
-TokenType = Literal["access", "refresh"]
+TokenType = Literal["access", "refresh", "calendar_state"]
 
 
 def hash_password(password: str) -> str:
@@ -55,6 +55,15 @@ def create_refresh_token(user_id: uuid.UUID, token_version: int) -> str:
         timedelta(days=settings.jwt_refresh_token_expire_days),
         token_version=token_version,
     )
+
+
+def create_calendar_state_token(user_id: uuid.UUID, ttl_seconds: int) -> str:
+    """A short-lived signed value for the Calendar OAuth `state` round-trip.
+
+    Distinct `type` claim from access/refresh tokens — `decode_token(..., "access")`
+    will reject it and vice versa.
+    """
+    return _encode(str(user_id), "calendar_state", timedelta(seconds=ttl_seconds))
 
 
 def decode_token(token: str, expected_type: TokenType) -> dict:

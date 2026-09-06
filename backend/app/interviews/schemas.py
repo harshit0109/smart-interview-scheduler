@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.scheduling.schemas import SlotOut
+
 RoundType = Literal["SCREENING", "TECHNICAL", "MANAGERIAL", "HR"]
 
 
@@ -56,3 +58,7 @@ class InterviewRequestOut(BaseModel):
     status: str
     created_at: datetime
     participants: list[ParticipantOut]
+    # Latest recommendation run's slots — populated only for ADMIN and the owning
+    # candidate (requirements.md §4). None when no run exists or the caller is a
+    # panelist. API_DESIGN.md routes recommendation viewing through this endpoint.
+    recommended_slots: list[SlotOut] | None = None

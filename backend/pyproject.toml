@@ -20,12 +20,13 @@ dependencies = [
     "bcrypt>=4.2",
     "pyjwt>=2.10",
     "google-auth[requests]>=2.37",  # requests extra: needed by google.auth.transport.requests
+    "httpx>=0.28",  # outbound Google Calendar HTTP (app/calendar/client.py)
+    "cryptography>=43",  # Fernet: OAuth tokens encrypted at rest
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
-    "httpx>=0.28",
     "ruff>=0.8",
 ]
 

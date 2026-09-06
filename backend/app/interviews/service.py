@@ -14,6 +14,8 @@ from app.core.errors import (
 from app.core.models import EDITABLE_STATUSES, InterviewRequest, User
 from app.core.pagination import Page, PageParams
 from app.interviews import repository, schemas
+from app.scheduling import repository as scheduling_repository
+from app.scheduling.schemas import SlotOut
 
 # D1 (PROJECT_CONTEXT.md): requests are created ready for the candidate, not DRAFT.
 INITIAL_STATUS = "AWAITING_CANDIDATE_AVAILABILITY"
@@ -110,7 +112,23 @@ async def get_request(
     request = await repository.get(db, request_id)
     if request is None or not _visible_to(request, viewer):
         raise NotFoundError("interview request not found")
-    return _to_out(request)
+    out = _to_out(request)
+    # ADMIN and the owning candidate may see the recommended slots (requirements.md §4).
+    if viewer.role == "ADMIN" or viewer.id == request.candidate_id:
+        run = await scheduling_repository.get_latest_run(db, request_id)
+        if run is not None:
+            out.recommended_slots = [
+                SlotOut(
+                    start_time=s.start_time,
+                    end_time=s.end_time,
+                    total_score=float(s.total_score),
+                    score_breakdown=s.score_breakdown,
+                    explanation=s.explanation,
+                    rank=s.rank,
+                )
+                for s in run.slots
+            ]
+    return out
 
 
 def _visible_to(request: InterviewRequest, viewer: User) -> bool:

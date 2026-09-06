@@ -26,5 +26,20 @@ class Settings(BaseSettings):
     # Empty in dev/test; /auth/google returns 401 until configured.
     google_login_oauth_client_id: str = ""
 
+    # Google CALENDAR connection only (calendar.freebusy / calendar.events).
+    # A separate OAuth client from the login one (CODING_GUIDELINES §OAuth Architecture).
+    google_calendar_oauth_client_id: str = ""
+    google_calendar_oauth_client_secret: str = ""
+    google_calendar_oauth_redirect_uri: str = "http://localhost:8000/api/v1/calendar/callback"
+    calendar_state_ttl_seconds: int = 300  # strict 5-minute OAuth-state window
+
+    # Fernet key for encrypting Calendar OAuth tokens at rest. The sentinel "dev"
+    # derives a throwaway local key (app/core/crypto.py); production MUST set a
+    # real key and the app refuses to start without one when environment=production.
+    calendar_token_encryption_key: str = "dev"
+
+    # Where GET /calendar/callback redirects the browser back to.
+    frontend_base_url: str = "http://localhost:3000"
+
 
 settings = Settings()

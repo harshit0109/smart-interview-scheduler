@@ -1,18 +1,22 @@
 """ORM models. See DB_DESIGN.md for the authoritative schema.
 
-Phase 2 owns `users` and creates `calendar_connections` as a schema-only
-placeholder (no code reads or writes it until Phase 6). Phase 3 adds
-`interview_requests`, `interview_participants` and `audit_logs`.
+Phase 2 owns `users` + `calendar_connections` (the latter schema-only until
+Phase 6). Phase 3 adds `interview_requests`, `interview_participants`,
+`audit_logs`. Phase 4 adds `candidate_availability`, `availability_windows`.
+Phase 6 adds `recommendation_runs`, `recommended_slots`.
 """
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -267,3 +271,60 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class RecommendationRun(Base):
+    """One invocation of the Scheduling Service → pure Engine for a request.
+
+    Written only by the Scheduling Service via its repository — never the Engine.
+    `input_snapshot` is the normalized engine input; it contains time zones,
+    windows, busy blocks and constraints only — never OAuth tokens.
+    """
+
+    __tablename__ = "recommendation_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    algorithm_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    input_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    slots: Mapped[list["RecommendedSlot"]] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="RecommendedSlot.rank",
+    )
+
+
+class RecommendedSlot(Base):
+    __tablename__ = "recommended_slots"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    recommendation_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("recommendation_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    total_score: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    score_breakdown: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_selected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+
+    run: Mapped["RecommendationRun"] = relationship(back_populates="slots")
