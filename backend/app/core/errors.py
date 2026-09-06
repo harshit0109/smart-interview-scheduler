@@ -146,6 +146,12 @@ class BookingPersistenceFailedError(AppError):
     message = "The booking could not be saved and did not complete."
 
 
+class RateLimitedError(AppError):
+    status_code = 429
+    code = "RATE_LIMITED"
+    message = "Too many requests. Please slow down and try again shortly."
+
+
 class NotBookedError(AppError):
     status_code = 409
     code = "NOT_BOOKED"
@@ -167,6 +173,14 @@ def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str)
             "trace_id": trace_id,
         }
     }
+
+
+def error_body(
+    code: str, message: str, *, field_errors: dict | None = None, trace_id: str | None = None
+) -> dict:
+    """Public helper for code that builds an error response outside the exception
+    handlers (e.g. the rate-limit middleware, which runs before routing)."""
+    return _envelope(code, message, field_errors, trace_id or uuid.uuid4().hex[:8])
 
 
 def register_exception_handlers(app: FastAPI) -> None:

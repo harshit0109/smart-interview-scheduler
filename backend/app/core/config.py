@@ -46,5 +46,19 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     email_from_address: str = "no-reply@smart-interview-scheduler.example"
 
+    # Rate limiting (Phase 11). Redis-backed fixed-window counter; fails OPEN if
+    # Redis is unreachable (DB_DESIGN.md §Redis Design — "degrades performance,
+    # never correctness"). Limits per API_DESIGN.md §Rate Limiting.
+    rate_limit_enabled: bool = True
+    # Trust the first X-Forwarded-For hop for the client IP. True is correct when
+    # the app runs behind exactly one trusted proxy (the Next.js rewrite proxy /
+    # a single load balancer); set False if the edge is untrusted.
+    rate_limit_trust_forwarded_for: bool = True
+    rate_limit_window_seconds: int = 60
+    rate_limit_strict_per_minute: int = 10  # public + candidate-facing endpoints
+    rate_limit_standard_per_minute: int = 60  # all other authenticated endpoints
+    rate_limit_recommendations_per_minute: int = 5  # Google Free/Busy amplification
+    rate_limit_booking_per_minute: int = 10  # Google event create/delete + lock + txn
+
 
 settings = Settings()

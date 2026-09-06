@@ -54,6 +54,43 @@ def _clean_db(_migrate):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _disable_rate_limit():
+    """The suite hammers endpoints far past 10/min from a single TestClient host.
+    Rate limiting is installed on the app always; the counter is bypassed here so
+    only the dedicated tests (via the `rate_limited` fixture) exercise it."""
+    settings.rate_limit_enabled = False
+    yield
+    settings.rate_limit_enabled = False
+
+
+def _flush_rate_limit_keys() -> None:
+    from redis.asyncio import Redis
+
+    async def _go() -> None:
+        r = Redis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            keys = [k async for k in r.scan_iter("ratelimit:*")]
+            if keys:
+                await r.delete(*keys)
+        finally:
+            await r.aclose()
+
+    asyncio.run(_go())
+
+
+@pytest.fixture
+def rate_limited():
+    """Opt-in: turn real rate limiting on for this test and clear its Redis
+    buckets before and after. Yields a helper with `.flush()` to reset windows
+    mid-test (so tests never need a real 60s sleep)."""
+    _flush_rate_limit_keys()
+    settings.rate_limit_enabled = True
+    yield SimpleNamespace(flush=_flush_rate_limit_keys)
+    settings.rate_limit_enabled = False
+    _flush_rate_limit_keys()
+
+
 @pytest.fixture
 def db_exec():
     """Run a raw SQL statement against the test DB (for arranging edge-case state)."""

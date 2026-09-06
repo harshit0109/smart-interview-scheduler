@@ -16,6 +16,7 @@ from app.booking.router import router as booking_router
 from app.calendar.router import router as calendar_router
 from app.core.db import engine
 from app.core.errors import register_exception_handlers
+from app.core.ratelimit import RateLimitMiddleware
 from app.core.redis import redis_client
 from app.interviews.router import router as interviews_router
 from app.scheduling.router import router as scheduling_router
@@ -35,6 +36,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Smart Interview Scheduler", version="0.1.0", lifespan=lifespan)
 register_exception_handlers(app)
+app.add_middleware(RateLimitMiddleware)
 app.include_router(auth_router, prefix=API_V1)
 app.include_router(users_router, prefix=API_V1)
 app.include_router(interviews_router, prefix=API_V1)
