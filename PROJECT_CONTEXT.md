@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 1 (Foundation & Infrastructure) implemented and verified (Docker stack unverified locally — no Docker on the dev machine).
+**Last updated:** 2026-09-06 — Backend Phase 2 (Database & Authentication, login only) complete and committed (`44599f9`). Docker stack now verified locally. Phase 3 (Interview Request Management) in progress.
 
 ---
 
@@ -104,36 +104,63 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     Redis local; unknown path → `404`. **Not verified:** `docker compose up` (Docker not installed
     on the dev machine) — deferred to CI / a Docker host.
 
+- **2026-09-06 — Backend Phase 2: Database & Authentication (login only).** Commit `44599f9`.
+  - `backend/app/auth/`: `register` (public, **CANDIDATE-only** — see C1 resolution), `login`
+    (password), `google` (Google **identity** token verification — aud/iss/exp, see G4), `refresh`
+    (JWT refresh with `token_version`). `schemas.py` / `service.py` / `repository.py` / `router.py`
+    / `google.py`.
+  - `backend/app/users/`: `GET /users/me`.
+  - `backend/app/core/`: `models.py` (`User`, `CalendarConnection` — the latter schema-only),
+    `security.py` (bcrypt + PyJWT access/refresh), `deps.py` (`get_current_user`, `require_role()`),
+    `errors.py` (typed `AppError`s + global handler → standard envelope), `db.py` (async session +
+    `get_db`).
+  - Alembic: `backend/alembic.ini`, `backend/migrations/` (async `env.py`), migration `0001`
+    (`users`, `calendar_connections`).
+  - `backend/scripts/seed.py` — provisions ADMIN + PANELIST accounts (public register can't).
+  - Routes mounted under `/api/v1`. New deps: `alembic`, `bcrypt`, `pyjwt`, `google-auth[requests]`,
+    `tzdata`, `pydantic[email]`. CI gained an `alembic upgrade head` step; Dockerfile runs migrations
+    on start.
+  - **Verified:** `alembic upgrade head` + down/up roundtrip clean; `ruff` clean; `pytest` 23
+    passed (auth flow, RBAC 403/401, "Google login writes no `calendar_connections`", bcrypt/JWT
+    units). `docker compose up --build` → backend healthy, `/health` 200.
+
 ### Current backend structure
 
 ```
 backend/
 ├── app/
-│   ├── main.py            # FastAPI app + GET /health + lifespan cleanup
+│   ├── main.py            # FastAPI app + GET /health + /api/v1 routers
+│   ├── auth/              # register / login / google / refresh
+│   ├── users/             # GET /users/me
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
-│       ├── db.py          # async SQLAlchemy engine (no models yet)
+│       ├── db.py          # async engine + session dependency
+│       ├── models.py      # User, CalendarConnection
+│       ├── security.py    # bcrypt + JWT
+│       ├── deps.py        # get_current_user, require_role()
+│       ├── errors.py      # typed errors + global handler
 │       └── redis.py       # async Redis client
-├── tests/test_health.py
-├── pyproject.toml  ·  Dockerfile  ·  .dockerignore  ·  .env.example
+├── migrations/            # Alembic (env.py + versions/0001)
+├── scripts/seed.py
+├── tests/  (test_health, test_security, test_auth, test_rbac)
+├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-Module folders (`auth/`, `calendar/`, `scheduling/`, …) are **not** created yet — each arrives
-with its phase, per `CODING_GUIDELINES.md` §Modular design.
+Remaining module folders (`interviews/`, `scheduling/`, `booking/`, …) arrive with their phase,
+per `CODING_GUIDELINES.md` §Modular design.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** nothing — Phase 1 complete and verified.
-- **Next immediate step:** run CI once (push branch) to confirm green on GitHub Actions with the
-  Postgres/Redis service containers, then **begin Phase 2 — Database & Authentication (login only)**
-  (`IMPLEMENTATION.md` Phase 2): `users` + `calendar_connections` (schema-only) tables, Alembic
-  migrations, password auth, Google **identity** login (identity scopes only), JWT access/refresh
-  with `token_version`, `require_role()` dependency, and the global exception handler + standard
-  error envelope.
-- **Resolve before starting Phase 2 (see §8):** **C1** (open `register` role selection) and
-  **G4** (`/auth/google` scope-claim check wording).
+- **In progress:** **Phase 3 — Interview Request Management** (`IMPLEMENTATION.md` Phase 3):
+  `interview_requests` + `interview_participants` tables (+ `audit_logs`, see D3), the new
+  `app/interviews/` module, and `POST /interviews` / `GET /interviews` / `GET /interviews/{id}` /
+  `PATCH /interviews/{id}` with per-role visibility. No availability / scoring / booking.
+- **Phase 3 decisions taken (see §7):** D1 — create requests directly in
+  `AWAITING_CANDIDATE_AVAILABILITY`; D2 — request-level `buffer_minutes` only, per-panelist
+  overrides deferred Post-MVP; D3 — `audit_logs` table + minimal `record_audit()` helper now.
+- **After Phase 3:** Phase 4 — Candidate Availability.
 
 **MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
 interview scheduling loop from request creation to real Calendar booking."* — **not yet passed.**
@@ -145,6 +172,31 @@ No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 3, D1 — resolves C2)** — `POST /interviews` creates a request **directly in
+  `AWAITING_CANDIDATE_AVAILABILITY`**, not `DRAFT`. Deviation from `API_DESIGN.md` (which says
+  `status: DRAFT`): the Core Demo Loop and API surface have no separate "send to candidate" step,
+  so ADMIN creating the request *is* that step. `DRAFT` stays a valid `CHECK` value for state-machine
+  integrity but is never persisted by any endpoint.
+- **2026-09-06 (Phase 3, D2 — resolves G2 for MVP)** — No per-participant working-hours or
+  per-panelist buffer override columns. MVP scoring (Phase 5) uses the request-level `buffer_minutes`
+  and a global working-hours constant. Overrides are Post-MVP.
+- **2026-09-06 (Phase 3, D3)** — `audit_logs` table created now (migration `0002`) with a minimal
+  `app/core/audit.py::record_audit()` helper, called on interview create/update. No audit
+  endpoint/UI (that is Post-MVP, Phase 9). FR-037 "opportunistic" writes begin here.
+- **2026-09-06 (Phase 2, C1 resolved)** — `POST /auth/register` is **CANDIDATE-only**: it ignores
+  any client-supplied role and always creates a `CANDIDATE`. ADMIN and PANELIST accounts are
+  provisioned out of band via `backend/scripts/seed.py`. `API_DESIGN.md`'s `register` body still
+  lists `role`; treat that field as removed for the MVP.
+- **2026-09-06 (Phase 2, G4 resolved)** — `POST /auth/google` verifies the Google **ID token** by
+  signature + `aud` (our login client id) + `iss` (`accounts.google.com`) + `exp` + `email_verified`
+  (via `google-auth`). There is **no** `scope`-claim inspection — Google ID tokens carry none;
+  identity-only scope is enforced client-side. The endpoint never touches `calendar_connections`.
+- **2026-09-06 (Phase 2)** — Migrations: Alembic (async `env.py`, URL/metadata from app config).
+  Tests run the real migrations once per session then truncate between tests. CI runs
+  `alembic upgrade head` before `pytest`; the backend container runs it on startup.
+- **2026-09-06 (Phase 2)** — `tzdata` is a hard runtime dep (Windows / `python:3.13-slim` ship no
+  zoneinfo DB, which the `timezone` validator needs). `google-auth[requests]` (not bare
+  `google-auth`) — the `requests` transport is required but not a declared dep.
 - **2026-09-06 (Phase 1)** — Repo layout: backend lives in `backend/`, frontend will live in
   `frontend/`. The `app/...` paths in `CODING_GUIDELINES.md` map to `backend/app/...`.
 - **2026-09-06 (Phase 1)** — `docker-compose.yml` at repo root; `frontend` service is committed
@@ -173,20 +225,14 @@ silently** — each item is resolved with Harshit before the phase it affects.
 
 ### Blockers — resolve before the noted phase (none block Phase 1)
 
-- **C1 (Phase 2):** `POST /auth/register` is public and takes a caller-chosen `role`, so anyone
-  can self-register as ADMIN. Contradicts `requirements.md` §4 ("create user accounts: ADMIN
-  only"). Decide: restrict self-signup to CANDIDATE + ADMIN-provisioned PANELIST/ADMIN, or accept
-  as a documented hackathon seeding shortcut.
-- **G4 (Phase 2):** `POST /auth/google` spec says to verify the token's `scope` claim contains no
-  Calendar scope, but Google **ID tokens** carry no `scope` claim. Reword to: request only
-  identity scopes client-side + verify `aud`/`iss`/`exp`; drop the scope-claim inspection.
-- **C2 (Phase 3/4):** Nothing transitions `DRAFT → AWAITING_CANDIDATE_AVAILABILITY`. `POST
-  /interviews` creates `DRAFT`; `POST /interviews/{id}/candidate-availability` requires
-  `AWAITING_CANDIDATE_AVAILABILITY`. Decide: create directly in `AWAITING_CANDIDATE_AVAILABILITY`,
-  or add an explicit "send to candidate" transition.
-- **G2 (Phase 3 schema / Phase 5):** `requirements.md` §7b mentions per-participant working-hours
-  and per-panelist buffer *overrides*, but no schema stores them. Decide: MVP uses org-default
-  constants only (mark overrides Post-MVP), or add columns now.
+- **C1 (Phase 2) — RESOLVED 2026-09-06.** `POST /auth/register` is CANDIDATE-only (ignores any
+  supplied role); ADMIN/PANELIST via `scripts/seed.py`. See §7.
+- **G4 (Phase 2) — RESOLVED 2026-09-06.** `POST /auth/google` verifies signature + `aud`/`iss`/`exp`
+  + `email_verified`; no `scope`-claim inspection; never touches `calendar_connections`. See §7.
+- **C2 (Phase 3/4) — RESOLVED 2026-09-06 (D1).** `POST /interviews` creates directly in
+  `AWAITING_CANDIDATE_AVAILABILITY`; no "send to candidate" transition. See §7.
+- **G2 (Phase 3 schema / Phase 5) — RESOLVED 2026-09-06 (D2).** No override columns; MVP uses
+  request-level `buffer_minutes` + a global working-hours constant. Overrides are Post-MVP. See §7.
 - **G1 (Phase 5):** Workload Balance (§8) needs per-panelist same-day booked-interview counts, but
   §7b's Engine input list omits them. The Service must gather this from `interview_events` and
   pass it into the Engine as normalized input; name it explicitly.

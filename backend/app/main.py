@@ -14,6 +14,7 @@ from app.auth.router import router as auth_router
 from app.core.db import engine
 from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
+from app.interviews.router import router as interviews_router
 from app.users.router import router as users_router
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ app = FastAPI(title="Smart Interview Scheduler", version="0.1.0", lifespan=lifes
 register_exception_handlers(app)
 app.include_router(auth_router, prefix=API_V1)
 app.include_router(users_router, prefix=API_V1)
+app.include_router(interviews_router, prefix=API_V1)
 
 
 async def _check_database() -> str:

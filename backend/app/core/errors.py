@@ -68,6 +68,24 @@ class ForbiddenError(AppError):
     message = "Your role does not permit this action."
 
 
+class NotFoundError(AppError):
+    status_code = 404
+    code = "NOT_FOUND"
+    message = "Resource not found."
+
+
+class InvalidParticipantError(AppError):
+    status_code = 422
+    code = "INVALID_PARTICIPANT"
+    message = "A referenced participant is missing or has the wrong role."
+
+
+class RequestLockedForEditingError(AppError):
+    status_code = 409
+    code = "REQUEST_LOCKED_FOR_EDITING"
+    message = "This interview request can no longer be edited in its current state."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {
