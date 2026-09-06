@@ -44,6 +44,30 @@ def test_admin_creates_request_in_awaiting_availability(client, make_user):
     assert roles[str(p2.id)] == "PANELIST"
 
 
+def test_create_persists_and_returns_title(client, make_user):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+
+    resp = _create(client, admin, candidate, [panelist], title="Senior Backend Engineer")
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["title"] == "Senior Backend Engineer"
+
+    get_resp = client.get(f"{V1}/interviews/{body['id']}", headers=admin.headers)
+    assert get_resp.json()["title"] == "Senior Backend Engineer"
+
+
+def test_create_without_title_returns_null(client, make_user):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+
+    resp = _create(client, admin, candidate, [panelist])
+    assert resp.status_code == 201
+    assert resp.json()["title"] is None
+
+
 def test_non_admin_cannot_create(client, make_user):
     candidate = make_user("CANDIDATE")
     panelist = make_user("PANELIST")

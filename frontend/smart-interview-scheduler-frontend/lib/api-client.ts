@@ -13,6 +13,8 @@ import {
   PaginatedResponse,
   ApiErrorResponse,
   CandidateAvailability,
+  ProvisionUserPayload,
+  ProvisionedUser,
 } from "./types";
 
 const API_BASE_URL =
@@ -233,6 +235,7 @@ interface BackendInterview {
   id: string;
   candidate_id: string;
   created_by: string;
+  title?: string | null;
   round_type: InterviewRequest["round_type"];
   duration_minutes: number;
   buffer_minutes: number;
@@ -342,6 +345,7 @@ function adaptInterview(
     candidate_name: resolveName(raw.candidate_id, dir, "Candidate"),
     candidate_email: resolveEmail(raw.candidate_id, dir),
     candidate_timezone: resolveTimezone(raw.candidate_id, dir),
+    title: raw.title ?? null,
     round_type: raw.round_type,
     duration_minutes: raw.duration_minutes,
     buffer_minutes: raw.buffer_minutes,
@@ -677,6 +681,53 @@ export const usersApi = {
     }
     return request<User[]>("/users?role=PANELIST");
   },
+
+  /** ADMIN-only: POST /users. Idempotent on (email, role); throws ApiClientError
+   * with code ROLE_CONFLICT (422) if the email exists under a different role. */
+  async provision(payload: ProvisionUserPayload): Promise<ProvisionedUser> {
+    if (IS_DEMO_MODE) {
+      const existing = DEMO_USERS.find(
+        (u) => u.email.toLowerCase() === payload.email.toLowerCase()
+      );
+      if (existing) {
+        if (existing.role !== payload.role) {
+          throw new ApiClientError(
+            `${payload.email} already exists as ${existing.role}.`,
+            "ROLE_CONFLICT",
+            422
+          );
+        }
+        return { ...existing, created: false };
+      }
+      const newUser: ProvisionedUser = {
+        id: `demo_${payload.role.toLowerCase()}_${Date.now()}`,
+        email: payload.email,
+        name: payload.name,
+        role: payload.role,
+        timezone: payload.timezone,
+        created: true,
+      };
+      DEMO_USERS.push(newUser);
+      return newUser;
+    }
+    const result = await request<ProvisionedUser>("/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    // Keep the interview-detail enrichment directory in sync so a POST /interviews
+    // that immediately follows resolves this person's name/email instead of
+    // falling back to a generic label (the directory only refetches on cache miss).
+    if (_directoryCache) {
+      _directoryCache[result.id] = {
+        id: result.id,
+        email: result.email,
+        name: result.name,
+        role: result.role,
+        timezone: result.timezone,
+      };
+    }
+    return result;
+  },
 };
 
 /* =========================================================
@@ -769,6 +820,7 @@ export const interviewsApi = {
         candidate_name: candidate.name,
         candidate_email: candidate.email,
         candidate_timezone: candidate.timezone,
+        title: payload.title ?? null,
         round_type: payload.round_type,
         duration_minutes: payload.duration_minutes,
         buffer_minutes: payload.buffer_minutes,

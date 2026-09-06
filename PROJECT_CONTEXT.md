@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phases 1–11 (partial, rate limiting) complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**. **New real-world onboarding/invitation architecture started:** Phase A (invitation schema, migration `0007`), Phase B (`POST /users` ADMIN provisioning + `POST /auth/bootstrap-admin` first-ADMIN web setup + `/setup` frontend route), and Phase C (admin RBAC fix + misleading-copy/UI cleanup) are committed locally on `main`, **not yet pushed**. Current migration head: `0007`. Invitation token issuance/dispatch and the interview-creation wizard rebuild are **not yet built** — later phases.
+**Last updated:** 2026-09-06 — Backend Phases 1–11 (partial, rate limiting) complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**. **New real-world onboarding/invitation architecture started:** Phase A (invitation schema, migration `0007`), Phase B (`POST /users` ADMIN provisioning + `POST /auth/bootstrap-admin` first-ADMIN web setup + `/setup` frontend route), Phase C (admin RBAC fix + misleading-copy/UI cleanup), and Phase C3/C4 (admin interview-creation wizard rebuild, `interview_requests.title` wired into the API) are committed locally on `main`, **not yet pushed**. Current migration head: `0007` (no new migration in C3/C4 — `title` already existed as a column, just wasn't exposed by the API). Invitation token issuance/dispatch is **not yet built** — the next phase.
 
 ---
 
@@ -471,6 +471,43 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   clean, `next build` OK (23 routes, `/panelist/settings` new). `git diff -- backend/app/scheduling/`
   empty. No backend files touched.
 
+- **2026-09-06 — Phase C3/C4: Admin interview-creation wizard rebuild.** *Not yet pushed.*
+  Reordered the wizard to Details → Candidate → Panelists → Review (was Candidate → Details →
+  Panelists → Review) to match the real-world flow. **Gap found and fixed (approved before
+  implementing):** `interview_requests.title` (Phase A's migration `0007`) existed only as a raw
+  ORM column — `CreateInterviewRequest`, `InterviewRequestOut`, and the repository/service create
+  path never read or wrote it, so nothing an admin typed could reach the database. Wired it through
+  end-to-end: `CreateInterviewRequest.title` (optional, max 200), `InterviewRequestOut.title`,
+  `repository.create(..., title=...)`, `service.create_request` pass-through, `service._to_out`
+  read-back. No migration needed (column already existed); no other endpoint or contract touched.
+  Two new backend tests (`test_create_persists_and_returns_title`,
+  `test_create_without_title_returns_null`) — `tests/test_interviews.py` now 17/17 passing.
+  **Candidate/Panelist steps:** existing `GET /users?role=` list + client-side name/email filter for
+  "search" (the backend has no free-text search param — confirmed by reading the router; a full
+  role-filtered list is what Phase 10 already built this on, so client-side filtering was the
+  correct minimal solution rather than inventing a server search endpoint). "Add new" inline forms
+  call the real `POST /users` (new `usersApi.provision()` in `lib/api-client.ts`) — surfaces
+  `ROLE_CONFLICT` (422) with a clear message, is idempotent on `(email, role)`, never offers ADMIN
+  as a role. Newly-provisioned vs. selected-existing participants are visibly tagged ("New" badge)
+  through to the review screen. Panelists support multi-select with removable chips. Empty
+  candidate/panelist directories show an inline "add one to get started" state instead of a dead
+  end; a directory *load failure* shows a distinct error + Retry rather than a silent empty list.
+  **Success screen stays honest:** states the interview was created (and participants provisioned,
+  when applicable) and explicitly says no invitations have been sent — no fake invitation-sent
+  status.
+  **Frontend directory-cache fix:** `usersApi.provision()` writes the newly-created user straight
+  into `api-client.ts`'s `_directoryCache` (used to enrich interview participant identity) so a
+  `POST /interviews` immediately following a provision resolves the new person's name/email instead
+  of falling back to a generic label.
+  **Scope not touched:** invitation issuance/dispatch, `/invitations/{token}`, `/invite/[token]`,
+  accept/decline/reschedule UI, resend, account claim — all deferred to the invitation phase.
+  **Verified:** targeted backend `pytest tests/test_interviews.py` 17 passed (full-suite run was
+  attempted but hung with no output — the documented port-5432 native-Postgres/Docker contention —
+  and was killed; targeted tests were the correct and sufficient scope per this phase's own
+  verification rule since only `app/interviews/` was touched). Frontend `next lint` clean (same 3
+  pre-existing warnings), `tsc --noEmit` clean, `next build` OK (24 routes; `admin/interviews/new`
+  bundle grew from ~6.3kB to ~8.6kB). `git diff -- backend/app/scheduling/` empty.
+
 ---
 
 ## 6. In progress / next immediate task
@@ -499,13 +536,12 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   Google Identity login end-to-end, `docker-compose` frontend service, real end-to-end demo
   against a live Google account, green CI run.
 - **In progress (new track):** Phases A (invitation schema), B (user provisioning + bootstrap
-  ADMIN), and C (admin RBAC + misleading-UI fixes) are committed locally on `main`
-  (`6ddc1dd`, `21fe1f8`, Phase C commit — see log), **not yet pushed**. Migration head `0007`.
-  This round of Phase C covered only RBAC + misleading-copy/UI fixes (see the Phase C entry
-  above); the interview-creation wizard rebuild (provisioning candidates/panelists inline via
-  `POST /users`) is explicitly **not yet done** and is the next approved chunk of work, followed by
-  invitation token issuance/dispatch and the public accept/decline/reschedule pages. Scheduling
-  engine remains frozen throughout.
+  ADMIN), C (admin RBAC + misleading-UI fixes), and C3/C4 (interview-creation wizard rebuild +
+  `title` wired into the API) are committed locally on `main` (`6ddc1dd`, `21fe1f8`, plus the Phase
+  C and C3/C4 commits — see log), **not yet pushed**. Migration head still `0007`.
+  **Next:** invitation token issuance/dispatch, `POST /interviews/{id}/invitations`,
+  `/invite/[token]`, and accept/decline/reschedule/unavailable response handling — the dedicated
+  invitation phase. Scheduling engine remains frozen throughout.
 
 ---
 

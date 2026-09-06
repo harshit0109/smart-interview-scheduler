@@ -111,6 +111,7 @@ export interface InterviewRequest {
   candidate_name: string;
   candidate_email: string;
   candidate_timezone: string;
+  title?: string | null;
   round_type: RoundType;
   duration_minutes: number;
   buffer_minutes: number;
@@ -125,10 +126,22 @@ export interface InterviewRequest {
 
 export interface CreateInterviewPayload {
   candidate_id: string;
+  title?: string;
   round_type: RoundType;
   duration_minutes: number;
   buffer_minutes: number;
   panelist_ids: string[];
+}
+
+export interface ProvisionUserPayload {
+  email: string;
+  name: string;
+  role: "CANDIDATE" | "PANELIST";
+  timezone: string;
+}
+
+export interface ProvisionedUser extends User {
+  created: boolean;
 }
 
 export interface SubmitAvailabilityPayload {

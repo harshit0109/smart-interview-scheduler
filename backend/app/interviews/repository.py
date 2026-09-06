@@ -54,10 +54,12 @@ async def create(
     buffer_minutes: int,
     panelist_ids: Sequence[uuid.UUID],
     status: str,
+    title: str | None = None,
 ) -> InterviewRequest:
     request = InterviewRequest(
         candidate_id=candidate_id,
         created_by=created_by,
+        title=title,
         round_type=round_type,
         duration_minutes=duration_minutes,
         buffer_minutes=buffer_minutes,
