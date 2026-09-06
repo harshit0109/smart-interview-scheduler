@@ -40,6 +40,35 @@ Ran unattended against the overnight "make it a coherent end-to-end product" bri
 
 Recommended next design conversation: the outcome/rounds model (unlocks no-show + advancement together), then whether Zoom is worth reopening.
 
+### Session-end state (2026-09-07)
+
+Commits made this session (on `main`, ahead of `origin/main`):
+`7e59c26` token-gated admin self-registration + auth entry UX ·
+`fb4cc0a` this audit ·
+`f245aca` lifecycle UI ·
+`f93e5bf` company field end-to-end.
+
+Verified live: all 3 containers healthy; `sis` at migration `0008`; the
+bootstrapped ADMIN row survived (1 user / 1 admin); `interview_requests`
+has `company` + `title`; `/health` ok; OpenAPI exposes `company`; frontend
+dev server up, key routes 200; backend suite green (65 across
+interviews/booking/notifications/lifecycle/bootstrap; migration up/down/up
+clean on a `_test` DB).
+
+**Infra incident:** repeated `next build` + `docker compose build` cycles
+filled the host C: drive (hit 0.29 GB free), which crashed the Docker
+daemon mid-session. Recovered by clearing ~2.5 GB of host npm/pip caches
+(regenerable, nothing tracked) and restarting Docker Desktop; the backend
+image rebuilt clean and the `db` volume (ADMIN row) was untouched. Lesson
+for future sessions: don't run `next build` against a live `next dev` (it
+corrupts `.next`), and prune Docker build cache between backend rebuilds.
+
+**Reminder-email enrichment is a known follow-up:** `send_booking_confirmation`
+now carries company/title but `send_lifecycle_notification` (used for the
+REMINDER type via `scripts/send_reminders.py`) does not — it only receives
+the `InterviewEvent`. Wiring company/title into reminders needs the reminder
+script to load the parent request; deferred to keep this session's diff tight.
+
 ---
 
 ## 1. Project identity
