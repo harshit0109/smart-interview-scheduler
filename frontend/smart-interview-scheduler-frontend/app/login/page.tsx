@@ -19,6 +19,12 @@ function LoginForm() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  // Cosmetic only — the backend decides the real role from the account. This
+  // just tailors the copy/links for the two audiences. Home page deep-links
+  // here with ?as=staff / ?as=candidate.
+  const [audience, setAudience] = React.useState<"staff" | "candidate">(
+    searchParams.get("as") === "candidate" ? "candidate" : "staff"
+  );
 
   const isExpired = searchParams.get("expired") === "1";
   const redirectTarget = searchParams.get("redirect");
@@ -121,6 +127,31 @@ function LoginForm() {
             </p>
           </div>
 
+          <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => setAudience("staff")}
+              className={
+                audience === "staff"
+                  ? "rounded-md bg-white py-2 text-slate-900 shadow-xs"
+                  : "rounded-md py-2 text-slate-500 hover:text-slate-700"
+              }
+            >
+              Administrator / Interviewer
+            </button>
+            <button
+              type="button"
+              onClick={() => setAudience("candidate")}
+              className={
+                audience === "candidate"
+                  ? "rounded-md bg-white py-2 text-slate-900 shadow-xs"
+                  : "rounded-md py-2 text-slate-500 hover:text-slate-700"
+              }
+            >
+              Candidate
+            </button>
+          </div>
+
           {isExpired && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -180,18 +211,21 @@ function LoginForm() {
           </form>
 
           <div className="pt-2 text-center text-xs text-slate-500 space-y-1">
-            <p>
-              Candidate?{" "}
-              <Link
-                href="/register"
-                className="text-workday-blue font-semibold hover:underline"
-              >
-                Create a candidate account
-              </Link>
-            </p>
-            <p className="text-slate-400">
-              Administrators and panelists sign in with credentials provided by their organization.
-            </p>
+            {audience === "candidate" ? (
+              <p>
+                New candidate?{" "}
+                <Link
+                  href="/register"
+                  className="text-workday-blue font-semibold hover:underline"
+                >
+                  Create a candidate account
+                </Link>
+              </p>
+            ) : (
+              <p className="text-slate-400">
+                Administrators and panelists sign in with credentials provided by their organization.
+              </p>
+            )}
           </div>
         </div>
       </div>

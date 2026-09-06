@@ -1,8 +1,8 @@
-"""POST /api/v1/auth/bootstrap-admin — first-ADMIN web bootstrap (Phase B).
+"""POST /api/v1/auth/bootstrap-admin — token-gated ADMIN web registration.
 
-Gated by the ADMIN_BOOTSTRAP_TOKEN shared secret (X-Bootstrap-Token header) and
-only while zero ADMIN users exist. Not configured OR wrong token => 404 (no
-discoverable public admin-registration route).
+Gated by the ADMIN_BOOTSTRAP_TOKEN shared secret (X-Bootstrap-Token header).
+Not configured OR wrong token => 404 (no discoverable public admin-registration
+route). Repeatable: a valid token may create more than one ADMIN.
 """
 
 import pytest
@@ -71,13 +71,17 @@ def test_success_returns_normal_token_pair(client, bootstrap_enabled):
     assert me.status_code == 200 and me.json()["email"] == BODY["email"]
 
 
-def test_second_bootstrap_conflicts_once_admin_exists(client, bootstrap_enabled, make_user):
+def test_token_allows_additional_admin_when_one_already_exists(
+    client, bootstrap_enabled, make_user, db_val
+):
     make_user("ADMIN")
     resp = client.post(
         f"{V1}/auth/bootstrap-admin", json=BODY, headers={"X-Bootstrap-Token": TOKEN}
     )
-    assert resp.status_code == 409
-    assert resp.json()["error"]["code"] == "ADMIN_ALREADY_EXISTS"
+    assert resp.status_code == 201
+    assert resp.json()["user"]["role"] == "ADMIN"
+    role = db_val("SELECT role FROM users WHERE email = :e", {"e": BODY["email"]})
+    assert role == "ADMIN"
 
 
 def test_audit_and_logs_carry_no_secrets(client, bootstrap_enabled, db_val, app_logs):

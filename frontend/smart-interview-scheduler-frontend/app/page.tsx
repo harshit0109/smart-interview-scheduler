@@ -109,22 +109,56 @@ export default function HomePage() {
         </p>
 
         {/* Action CTAs */}
-        <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <button
-            onClick={handleOpenWorkspace}
-            className="inline-flex items-center justify-center font-semibold text-sm px-6 py-3 rounded-md bg-workday-blue text-white hover:bg-workday-blue-hover shadow-xs transition-all duration-150 gap-2"
-          >
-            <span>{isAuthenticated ? "Open Workspace" : "Sign In to Workspace"}</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-          {!isAuthenticated && (
-            <Link href="/register">
-              <Button variant="outline" size="lg">
-                Create Candidate Account
-              </Button>
-            </Link>
-          )}
-        </div>
+        {isAuthenticated ? (
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+            <button
+              onClick={handleOpenWorkspace}
+              className="inline-flex items-center justify-center font-semibold text-sm px-6 py-3 rounded-md bg-workday-blue text-white hover:bg-workday-blue-hover shadow-xs transition-all duration-150 gap-2"
+            >
+              <span>Open Workspace</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-2xl mx-auto">
+            <div className="p-5 rounded-lg border border-slate-200 bg-white text-left space-y-2">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-workday-blue" />
+                Administrator &amp; Interviewer
+              </h3>
+              <p className="text-xs text-slate-500">
+                Sign in with credentials provided by your organization.
+              </p>
+              <Link href="/login?as=staff" className="block">
+                <Button variant="workday" size="sm" className="w-full gap-1.5">
+                  <span>Staff sign-in</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Button>
+              </Link>
+            </div>
+            <div className="p-5 rounded-lg border border-slate-200 bg-white text-left space-y-2">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-workday-blue" />
+                Candidate
+              </h3>
+              <p className="text-xs text-slate-500">
+                Sign in, or create an account to submit your availability.
+              </p>
+              <div className="flex gap-2">
+                <Link href="/login?as=candidate" className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full">
+                    Sign in
+                  </Button>
+                </Link>
+                <Link href="/register" className="flex-1">
+                  <Button variant="workday" size="sm" className="w-full">
+                    Register
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* 5 Deterministic Factors Feature Showcase */}

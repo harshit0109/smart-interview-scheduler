@@ -16,7 +16,6 @@ from app.auth.google import verify_id_token
 from app.core.audit import record_audit
 from app.core.config import settings
 from app.core.errors import (
-    AdminAlreadyExistsError,
     EmailAlreadyRegisteredError,
     InvalidCredentialsError,
     NotFoundError,
@@ -69,23 +68,20 @@ async def register(db: AsyncSession, data: schemas.RegisterRequest) -> User:
 async def bootstrap_admin(
     db: AsyncSession, data: schemas.BootstrapAdminRequest, provided_token: str | None
 ) -> schemas.TokenPair:
-    """Create the very first ADMIN through the web. Gated by a shared secret in
-    ADMIN_BOOTSTRAP_TOKEN and only while zero ADMIN users exist. When the token
-    is not configured OR does not match, the endpoint behaves as if it does not
-    exist (404) — no discoverable public admin-registration route.
+    """Register an ADMIN through the web, gated by the ADMIN_BOOTSTRAP_TOKEN
+    shared secret (X-Bootstrap-Token header). When the token is not configured
+    OR does not match, the endpoint behaves as if it does not exist (404) — the
+    secret is the only thing between a visitor and an ADMIN account, so there is
+    no discoverable public admin-registration route without it.
+
+    Repeatable by design: anyone holding the secret can create additional
+    ADMINs (the STRICT 10/min rate limit still applies).
     """
     configured = settings.admin_bootstrap_token
     if not configured or not provided_token or not secrets.compare_digest(
         provided_token, configured
     ):
         raise NotFoundError()
-
-    if await repository.count_by_role(db, "ADMIN") > 0:
-        raise AdminAlreadyExistsError()
-    # ponytail: two concurrent bootstrap calls with different emails could both
-    # pass this check and create two ADMINs. Acceptable for a one-time cold-start
-    # gated by a shared secret + STRICT 10/min rate limit; add a Postgres advisory
-    # lock around the check+insert if that ever matters.
 
     try:
         user = await repository.create(

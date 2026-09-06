@@ -7,7 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sparkles, CheckCircle2, AlertCircle, Globe } from "lucide-react";
+import { Sparkles, CheckCircle2, AlertCircle, Globe, ShieldCheck } from "lucide-react";
 import { getSystemTimezone } from "@/lib/utils";
 
 const COMMON_TIMEZONES = [
@@ -27,13 +27,15 @@ const COMMON_TIMEZONES = [
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register, isLoading } = useAuth();
+  const { register, bootstrapAdmin, isLoading } = useAuth();
 
+  const [role, setRole] = React.useState<"CANDIDATE" | "ADMIN">("CANDIDATE");
   const [name, setName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
   const [timezone, setTimezone] = React.useState("UTC");
+  const [adminCode, setAdminCode] = React.useState("");
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -58,13 +60,33 @@ export default function RegisterPage() {
       setErrorMsg("Passwords do not match.");
       return;
     }
+    if (role === "ADMIN" && !adminCode.trim()) {
+      setErrorMsg("An administrator signup code is required.");
+      return;
+    }
 
     try {
-      await register({ name, email, password, timezone });
-      // Self-registration always creates a CANDIDATE account (backend decision C1).
-      router.push("/candidate");
+      if (role === "ADMIN") {
+        // Token-gated: the backend verifies adminCode against ADMIN_BOOTSTRAP_TOKEN
+        // and 404s on mismatch. Candidate signup needs no code.
+        await bootstrapAdmin({
+          name,
+          email,
+          password,
+          timezone,
+          bootstrap_token: adminCode.trim(),
+        });
+        router.push("/admin");
+      } else {
+        await register({ name, email, password, timezone });
+        router.push("/candidate");
+      }
     } catch (err: any) {
-      setErrorMsg(err.message || "Registration failed. Please verify your details.");
+      if (role === "ADMIN" && err?.statusCode === 404) {
+        setErrorMsg("Administrator signup code is incorrect, or admin registration is disabled on this server.");
+      } else {
+        setErrorMsg(err.message || "Registration failed. Please verify your details.");
+      }
     }
   };
 
@@ -80,7 +102,7 @@ export default function RegisterPage() {
           </span>
         </Link>
         <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-          Create candidate account
+          {role === "ADMIN" ? "Create administrator account" : "Create candidate account"}
         </h2>
         <p className="mt-1 text-xs text-slate-500">
           Already registered?{" "}
@@ -100,6 +122,31 @@ export default function RegisterPage() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setRole("CANDIDATE")}
+                className={
+                  role === "CANDIDATE"
+                    ? "rounded-md bg-white py-2 text-slate-900 shadow-sm"
+                    : "rounded-md py-2 text-slate-500 hover:text-slate-700"
+                }
+              >
+                Candidate
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole("ADMIN")}
+                className={
+                  role === "ADMIN"
+                    ? "rounded-md bg-white py-2 text-slate-900 shadow-sm"
+                    : "rounded-md py-2 text-slate-500 hover:text-slate-700"
+                }
+              >
+                Administrator
+              </button>
+            </div>
+
             <div>
               <Label htmlFor="name" required>
                 Full Name
@@ -128,17 +175,42 @@ export default function RegisterPage() {
               />
             </div>
 
-            {/* Self-registration creates a CANDIDATE account. ADMIN and PANELIST
-                accounts are provisioned by an administrator, not self-served. */}
-            <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-slate-700 flex items-start gap-2">
-              <CheckCircle2 className="w-4 h-4 text-workday-blue shrink-0 mt-0.5" />
-              <span>
-                This creates a <span className="font-semibold">Candidate</span>{" "}
-                account for submitting interview availability. Recruiter (Admin)
-                and Interviewer (Panelist) accounts are set up by your
-                administrator.
-              </span>
-            </div>
+            {role === "ADMIN" ? (
+              <>
+                <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-slate-700 flex items-start gap-2">
+                  <ShieldCheck className="w-4 h-4 text-workday-blue shrink-0 mt-0.5" />
+                  <span>
+                    Creating an <span className="font-semibold">Administrator</span>{" "}
+                    account requires the server signup code
+                    (<span className="font-mono">ADMIN_BOOTSTRAP_TOKEN</span>),
+                    provided by whoever deployed this server.
+                  </span>
+                </div>
+                <div>
+                  <Label htmlFor="adminCode" required>
+                    Administrator signup code
+                  </Label>
+                  <Input
+                    id="adminCode"
+                    type="password"
+                    autoComplete="off"
+                    placeholder="Server setup token"
+                    value={adminCode}
+                    onChange={(e) => setAdminCode(e.target.value)}
+                    required
+                  />
+                </div>
+              </>
+            ) : (
+              <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-slate-700 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-workday-blue shrink-0 mt-0.5" />
+                <span>
+                  This creates a <span className="font-semibold">Candidate</span>{" "}
+                  account for submitting interview availability. Interviewer
+                  (Panelist) accounts are set up by an administrator.
+                </span>
+              </div>
+            )}
 
             {/* Timezone Selector with IANA Names (Section 10) */}
             <div>
