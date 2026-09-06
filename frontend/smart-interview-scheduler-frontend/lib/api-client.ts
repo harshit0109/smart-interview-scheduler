@@ -15,6 +15,11 @@ import {
   CandidateAvailability,
   ProvisionUserPayload,
   ProvisionedUser,
+  InvitationRecord,
+  InvitationSummary,
+  InvitationPublic,
+  InvitationRespondPayload,
+  ClaimAccountPayload,
 } from "./types";
 
 const API_BASE_URL =
@@ -482,6 +487,57 @@ export const authApi = {
 
   async logout(): Promise<void> {
     clearStoredTokens();
+  },
+};
+
+/* =========================================================
+   INVITATIONS API
+
+   No demo-mode fallback: this feature has no offline fixture data and is
+   implemented directly against the real backend contract (app/invitations/,
+   backend commit `415cf18`). Every call below hits the live API.
+========================================================= */
+export const invitationsApi = {
+  /** ADMIN. Issues one invitation per current participant, or rotates
+   * (resends) the token for anyone who already has one. */
+  async issue(requestId: string): Promise<InvitationSummary[]> {
+    return request<InvitationSummary[]>(`/interviews/${requestId}/invitations`, {
+      method: "POST",
+    });
+  },
+
+  /** ADMIN. Current invitation state per participant — no invite_url, per
+   * the backend's own design (the link isn't recoverable outside a resend). */
+  async list(requestId: string): Promise<InvitationRecord[]> {
+    return request<InvitationRecord[]>(`/interviews/${requestId}/invitations`);
+  },
+
+  /** Public — no auth. The token itself is the credential. */
+  async getByToken(token: string): Promise<InvitationPublic> {
+    return request<InvitationPublic>(`/invitations/${encodeURIComponent(token)}`);
+  },
+
+  /** Public — no auth. */
+  async respond(
+    token: string,
+    payload: InvitationRespondPayload
+  ): Promise<InvitationPublic> {
+    return request<InvitationPublic>(
+      `/invitations/${encodeURIComponent(token)}/respond`,
+      { method: "POST", body: JSON.stringify(payload) }
+    );
+  },
+
+  /** Public — no auth beyond the token. Stores the returned tokens exactly
+   * like authApi.login/bootstrapAdmin so the existing refresh/session flow
+   * picks them up unchanged. */
+  async claimAccount(token: string, payload: ClaimAccountPayload): Promise<AuthTokens> {
+    const tokens = await request<AuthTokens>(
+      `/invitations/${encodeURIComponent(token)}/claim-account`,
+      { method: "POST", body: JSON.stringify(payload) }
+    );
+    storeTokens(tokens);
+    return tokens;
   },
 };
 

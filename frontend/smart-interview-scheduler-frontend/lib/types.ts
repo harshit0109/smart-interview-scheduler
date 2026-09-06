@@ -144,6 +144,49 @@ export interface ProvisionedUser extends User {
   created: boolean;
 }
 
+export type InvitationStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "UNAVAILABLE" | "EXPIRED";
+export type InvitationDeliveryStatus = "SENT" | "SIMULATED" | "FAILED";
+export type InvitationResponseValue = "ACCEPTED" | "DECLINED" | "UNAVAILABLE";
+
+/** What GET /interviews/{id}/invitations returns per participant — no
+ * invite_url; the link is only ever recoverable at issuance/resend time. */
+export interface InvitationRecord {
+  id: string;
+  user_id: string;
+  role: Role;
+  status: InvitationStatus;
+  requires_account_setup: boolean;
+  delivery_status: InvitationDeliveryStatus | null;
+  send_count: number;
+  expires_at: string;
+  responded_at: string | null;
+}
+
+/** What POST /interviews/{id}/invitations returns — carries invite_url once. */
+export interface InvitationSummary extends Omit<InvitationRecord, "responded_at"> {
+  invite_url: string;
+}
+
+/** What an unauthenticated recipient sees at GET /invitations/{token}. */
+export interface InvitationPublic {
+  role: Role;
+  status: InvitationStatus;
+  requires_account_setup: boolean;
+  account_claimed: boolean;
+  interview_title: string | null;
+  round_type: RoundType;
+  duration_minutes: number;
+}
+
+export interface InvitationRespondPayload {
+  response: InvitationResponseValue;
+  reason?: string;
+}
+
+export interface ClaimAccountPayload {
+  password: string;
+}
+
 export interface SubmitAvailabilityPayload {
   timezone: string;
   windows: {

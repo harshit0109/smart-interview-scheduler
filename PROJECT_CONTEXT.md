@@ -548,8 +548,43 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   (34 combined), `test_rate_limit.py`/`test_notifications.py` (26 combined),
   `test_booking.py`/`test_lifecycle.py`/`test_self_service.py` (33 combined) — all still green.
   `git diff -- backend/app/scheduling/` empty; alembic head still `0007`.
-  **Deferred to commit 2 (frontend):** `app/invite/[token]/page.tsx`, admin "Send Invitations"
-  trigger UI, `invitationsApi`/types in the frontend.
+
+- **2026-09-06 — Invitation phase, commit 2: frontend `/invite/[token]` + admin trigger.** *Not
+  yet pushed.* Backend untouched (re-ran `tests/test_invitations.py`, still 20/20 — implemented
+  exactly against the existing contract, no gaps found this round).
+  - **`lib/types.ts`:** `InvitationRecord`/`InvitationSummary`/`InvitationPublic`/
+    `InvitationRespondPayload`/`ClaimAccountPayload`, matching the backend response/request shapes
+    field-for-field.
+  - **`lib/api-client.ts`:** `invitationsApi.{issue, list, getByToken, respond, claimAccount}` — a
+    deliberate exception to this file's usual `IS_DEMO_MODE` branch on every call: invitations have
+    no offline fixture data and are implemented directly against the live backend only (noted in a
+    comment). `claimAccount` calls the existing `storeTokens()` helper — the same one
+    `authApi.login`/`bootstrapAdmin` use — so the refresh/session flow picks the new tokens up
+    unchanged.
+  - **`lib/auth-context.tsx`:** new `claimInvitationAccount(token, password)`, mirroring
+    `bootstrapAdmin` exactly (call the API, then `usersApi.getMe()` to populate app-wide user state
+    so the rest of the UI reflects the login immediately).
+  - **`app/invite/[token]/page.tsx`** (new, public — no `RoleGuard`, same tier as `/login`/
+    `/register`/`/setup`): loading / not-found / expired / already-responded states are all
+    distinct and honest (no generic catch-all error swallowing an expired or already-used link).
+    Accept/Decline/Unavailable buttons call `respond()`; an optional reason field is always visible
+    (backend accepts `reason` on any response, not just decline). The account-setup form (password
+    + confirm, same validation as `/register`) only appears when `requires_account_setup &&
+    !account_claimed`, and is **structurally independent** of the response section — a decline
+    doesn't hide or block it (`test_respond_and_claim_are_independent` on the backend covers the
+    matching case). After a successful claim, the page shows "you're signed in" **only** because
+    `claimInvitationAccount` actually returned and stored a token pair — there is no
+    optimistic/assumed-success copy anywhere in the flow.
+  - **Admin trigger** (`app/(admin)/admin/interviews/[id]/page.tsx`): a new "Invitations" card
+    fetches `GET .../invitations` on load and lists each participant's real `status` +
+    `delivery_status` (SENT/SIMULATED/FAILED shown verbatim, SIMULATED labeled "no email service"
+    rather than implying anything was sent). "Send Invitations" / "Resend All" calls the issuance
+    endpoint and shows the freshly-returned `invite_url` per participant as a copy-box (reusing the
+    existing `CopyButton`) — links from a previous session aren't shown again, matching the
+    backend's own "not recoverable outside a resend" design.
+  - **Verified:** `next lint` clean (same 3 pre-existing warnings), `tsc --noEmit` clean, `next
+    build` OK (24 routes; `/invite/[token]` new, dynamic). `git diff -- backend/` empty for this
+    commit (frontend-only). `git diff -- backend/app/scheduling/` empty.
 
 ---
 
@@ -580,12 +615,15 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
   against a live Google account, green CI run.
 - **In progress (new track):** Phases A (invitation schema), B (user provisioning + bootstrap
   ADMIN), C (admin RBAC + misleading-UI fixes), C3/C4 (interview-creation wizard rebuild +
-  `title` wired into the API), and the invitation phase's backend commit (`app/invitations/`) are
-  committed locally on `main` (`6ddc1dd`, `21fe1f8`, plus the Phase C, C3/C4, and invitation-backend
-  commits — see log), **not yet pushed**. Migration head still `0007`.
-  **Next:** invitation phase commit 2 (frontend) — `app/invite/[token]/page.tsx`, an admin "Send
-  Invitations" trigger on the interview-detail page, `invitationsApi`/types in
-  `lib/api-client.ts`/`lib/types.ts`. Scheduling engine remains frozen throughout.
+  `title` wired into the API), and both invitation-phase commits (backend `app/invitations/` +
+  frontend `/invite/[token]` + admin trigger) are committed locally on `main` (`6ddc1dd`,
+  `21fe1f8`, plus the Phase C, C3/C4, and two invitation commits — see log), **not yet pushed**.
+  Migration head still `0007`.
+  **Next:** the invitation phase's frontend/backend foundation is now complete end-to-end
+  (issue → link → respond → claim). Open follow-ups for a later phase: cascading a DECLINED
+  response into the authenticated booking-cancellation lifecycle (deliberately not done — see the
+  commit-1 entry above), a resend-cooldown UI, and bulk invitation management. Scheduling engine
+  remains frozen throughout.
 
 ---
 

@@ -12,6 +12,7 @@ import {
   authApi,
   usersApi,
   calendarApi,
+  invitationsApi,
   getStoredAccessToken,
   clearStoredTokens,
   setCachedProfile,
@@ -37,6 +38,7 @@ interface AuthContextType {
     timezone: string;
     bootstrap_token: string;
   }) => Promise<User>;
+  claimInvitationAccount: (token: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
   refreshCalendarStatus: () => Promise<void>;
@@ -159,6 +161,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  const claimInvitationAccount = async (token: string, password: string): Promise<User> => {
+    setIsLoading(true);
+    try {
+      // Returns a full token pair on success; load the profile like login does.
+      await invitationsApi.claimAccount(token, { password });
+      const profile = await usersApi.getMe();
+      applyUser(profile);
+      if (profile.role === "PANELIST" || profile.role === "ADMIN") {
+        await refreshCalendarStatus();
+      }
+      return profile;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await authApi.logout();
@@ -187,6 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         login,
         register,
         bootstrapAdmin,
+        claimInvitationAccount,
         logout,
         refreshToken,
         refreshCalendarStatus,

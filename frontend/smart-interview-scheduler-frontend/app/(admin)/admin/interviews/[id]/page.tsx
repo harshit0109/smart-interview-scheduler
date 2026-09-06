@@ -3,14 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { interviewsApi } from "@/lib/api-client";
-import { InterviewRequest } from "@/lib/types";
+import { interviewsApi, invitationsApi, ApiClientError } from "@/lib/api-client";
+import { InterviewRequest, InvitationRecord, InvitationSummary } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InterviewTimeline } from "@/components/shared/InterviewTimeline";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { formatDateTime, formatDateOnly, formatTimeRange } from "@/lib/utils";
 import {
   Calendar,
@@ -25,6 +26,8 @@ import {
   AlertCircle,
   Copy,
   CalendarCheck,
+  Send,
+  RefreshCw,
 } from "lucide-react";
 
 export default function AdminInterviewDetailPage() {
@@ -34,6 +37,22 @@ export default function AdminInterviewDetailPage() {
 
   const [interview, setInterview] = React.useState<InterviewRequest | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+
+  const [invitations, setInvitations] = React.useState<InvitationRecord[]>([]);
+  const [justIssued, setJustIssued] = React.useState<Record<string, InvitationSummary>>({});
+  const [isIssuing, setIsIssuing] = React.useState(false);
+  const [issueError, setIssueError] = React.useState<string | null>(null);
+
+  const loadInvitations = React.useCallback(async () => {
+    try {
+      const rows = await invitationsApi.list(id);
+      setInvitations(rows);
+    } catch {
+      // No invitations issued yet (or a transient error) — the "Send
+      // Invitations" card below handles the empty state either way.
+      setInvitations([]);
+    }
+  }, [id]);
 
   React.useEffect(() => {
     const load = async () => {
@@ -47,7 +66,28 @@ export default function AdminInterviewDetailPage() {
       }
     };
     load();
-  }, [id]);
+    loadInvitations();
+  }, [id, loadInvitations]);
+
+  const handleSendInvitations = async () => {
+    setIsIssuing(true);
+    setIssueError(null);
+    try {
+      const issued = await invitationsApi.issue(id);
+      const byUser: Record<string, InvitationSummary> = {};
+      for (const row of issued) byUser[row.user_id] = row;
+      setJustIssued(byUser);
+      await loadInvitations();
+    } catch (err: any) {
+      setIssueError(
+        err instanceof ApiClientError
+          ? err.message
+          : "Failed to send invitations. Please try again."
+      );
+    } finally {
+      setIsIssuing(false);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -249,6 +289,109 @@ export default function AdminInterviewDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Invitations */}
+      <Card className="border-slate-200 shadow-xs">
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-sm">Invitations</CardTitle>
+            <CardDescription className="text-xs">
+              Send or resend an interview invitation to the candidate and every panelist.
+            </CardDescription>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleSendInvitations}
+            isLoading={isIssuing}
+            className="gap-1.5 shrink-0"
+          >
+            {invitations.length > 0 ? (
+              <RefreshCw className="w-3.5 h-3.5" />
+            ) : (
+              <Send className="w-3.5 h-3.5" />
+            )}
+            {invitations.length > 0 ? "Resend All" : "Send Invitations"}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {issueError && (
+            <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{issueError}</span>
+            </div>
+          )}
+
+          {invitations.length === 0 ? (
+            <p className="text-xs text-slate-400 py-2">
+              No invitations sent yet. Sending does not affect the interview request itself.
+            </p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {invitations.map((inv) => {
+                const person =
+                  inv.user_id === interview.candidate_id
+                    ? { name: interview.candidate_name, email: interview.candidate_email }
+                    : interview.panelists.find((p) => p.user_id === inv.user_id) ||
+                      interview.panelists.find((p) => p.id === inv.user_id);
+                const fresh = justIssued[inv.user_id];
+                return (
+                  <div key={inv.id} className="py-3 space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {person?.name || "Unknown"}{" "}
+                          <span className="font-normal text-slate-400">({inv.role})</span>
+                        </p>
+                        <p className="text-slate-500">{person?.email}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <InvitationStatusBadge status={inv.status} />
+                        <DeliveryStatusBadge status={inv.delivery_status} />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-400">
+                      Sent {inv.send_count}x • Expires {formatDateOnly(inv.expires_at)}
+                    </p>
+                    {fresh && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          readOnly
+                          value={fresh.invite_url}
+                          className="flex-1 font-mono text-[11px] bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5 text-slate-700 select-all"
+                        />
+                        <CopyButton textToCopy={fresh.invite_url} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+function InvitationStatusBadge({ status }: { status: string }) {
+  const variant =
+    status === "ACCEPTED"
+      ? "success"
+      : status === "DECLINED"
+      ? "danger"
+      : status === "UNAVAILABLE"
+      ? "warning"
+      : status === "EXPIRED"
+      ? "outline"
+      : "info";
+  return <Badge variant={variant}>{status}</Badge>;
+}
+
+function DeliveryStatusBadge({ status }: { status: string | null }) {
+  if (!status) return null;
+  const label =
+    status === "SENT" ? "Email Sent" : status === "SIMULATED" ? "Simulated (no email service)" : "Delivery Failed";
+  const variant = status === "SENT" ? "success" : status === "SIMULATED" ? "outline" : "danger";
+  return <Badge variant={variant}>{label}</Badge>;
 }
