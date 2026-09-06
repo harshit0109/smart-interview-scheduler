@@ -195,7 +195,8 @@ export default function InvitePage() {
                 <div className="space-y-3">
                   <div>
                     <Label htmlFor="reason" className="text-[11px]">
-                      Reason (optional — shown if you decline or mark unavailable)
+                      Reason (optional — shared with the recruiter if you decline
+                      {invitation.role === "PANELIST" ? " or mark unavailable" : ""})
                     </Label>
                     <Input
                       id="reason"
@@ -212,7 +213,16 @@ export default function InvitePage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {/* Candidates: Accept / Decline only. UNAVAILABLE is a
+                      panelist-only response (the backend rejects it for a
+                      candidate invitation), so don't offer it to candidates. */}
+                  <div
+                    className={
+                      invitation.role === "PANELIST"
+                        ? "grid grid-cols-1 sm:grid-cols-3 gap-2"
+                        : "grid grid-cols-1 sm:grid-cols-2 gap-2"
+                    }
+                  >
                     <Button
                       variant="primary"
                       size="md"
@@ -233,16 +243,18 @@ export default function InvitePage() {
                     >
                       Decline
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="md"
-                      onClick={() => handleRespond("UNAVAILABLE")}
-                      isLoading={isResponding === "UNAVAILABLE"}
-                      disabled={isResponding !== null}
-                      className="text-amber-700 border-amber-200 hover:bg-amber-50"
-                    >
-                      Unavailable
-                    </Button>
+                    {invitation.role === "PANELIST" && (
+                      <Button
+                        variant="outline"
+                        size="md"
+                        onClick={() => handleRespond("UNAVAILABLE")}
+                        isLoading={isResponding === "UNAVAILABLE"}
+                        disabled={isResponding !== null}
+                        className="text-amber-700 border-amber-200 hover:bg-amber-50"
+                      >
+                        Unavailable
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}

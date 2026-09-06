@@ -86,9 +86,23 @@ export default function AdminRecommendationsPage() {
         setErrorMsg(
           "This interview isn't ready for scheduling yet. Make sure the candidate has submitted availability."
         );
-      } else if (err.code === "PANELIST_CALENDAR_NOT_CONNECTED") {
+      } else if (
+        err.code === "PANELIST_CALENDAR_NOT_CONNECTED" ||
+        err.code === "CALENDAR_CONNECTION_REVOKED" ||
+        err.code === "CALENDAR_CONNECTION_EXPIRED"
+      ) {
+        // The backend message names the specific panelist — keep it, then say
+        // what to do about it.
         setErrorMsg(
-          "Scheduling can't continue because an assigned panelist's Google Calendar isn't connected."
+          `${err.message || "An assigned panelist's Google Calendar isn't connected."} ` +
+            "The scheduling engine reads each panelist's free/busy from Google Calendar, " +
+            "so every panelist must connect theirs (their “Google Calendar” page) " +
+            "before recommendations can run. If Google Calendar OAuth isn't configured on " +
+            "this deployment yet, set GOOGLE_CALENDAR_OAUTH_CLIENT_ID / _SECRET on the backend."
+        );
+      } else if (err.code === "CALENDAR_SYNC_FAILED") {
+        setErrorMsg(
+          "Couldn't reach Google Calendar to read panelist availability. This is usually transient — try Re-evaluate in a moment."
         );
       } else if (err.code === "NO_COMMON_AVAILABILITY") {
         setErrorMsg(
