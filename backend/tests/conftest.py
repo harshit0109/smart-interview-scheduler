@@ -2,15 +2,22 @@
 
 Tests run against the DATABASE_URL Postgres (the docker-compose / CI instance).
 The schema is created once via the real Alembic migrations; tables are truncated
-between tests. Note: this wipes data in whatever DB DATABASE_URL points at —
-point it at a throwaway database, not a populated one.
+between tests — this DESTROYS whatever is in the target database.
+
+That is not a theoretical hazard: running the suite with the default
+DATABASE_URL wiped the local dev database and left fixture rows behind, which
+then blocked the first-ADMIN bootstrap (an ADMIN existed, but with no password,
+so it could neither be used nor re-bootstrapped). `_guard_test_database` below
+now refuses to run unless the target is clearly disposable.
 """
 
 import asyncio
 import logging
+import os
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 import pytest
 from alembic import command
@@ -25,6 +32,35 @@ from app.core.crypto import encrypt
 from app.core.security import create_access_token
 from app.main import app
 from app.notifications.client import get_sendgrid_client
+
+
+def _guard_test_database() -> None:
+    """Refuse to run against a database that isn't clearly disposable.
+
+    Allowed: a database whose name ends in `_test`, any CI runner (GitHub
+    Actions sets CI=true), or an explicit SIS_ALLOW_DESTRUCTIVE_TESTS=1 opt-in.
+    """
+    db_name = urlsplit(settings.database_url).path.lstrip("/")
+    if db_name.endswith("_test") or os.getenv("CI") or os.getenv(
+        "SIS_ALLOW_DESTRUCTIVE_TESTS"
+    ) == "1":
+        return
+    pytest.exit(
+        f"Refusing to run: DATABASE_URL points at {db_name!r}, which is not a "
+        "test database. This suite TRUNCATEs every table between tests and "
+        "would destroy it.\n\n"
+        "  Create one once:  docker compose exec db psql -U sis -c "
+        '"CREATE DATABASE sis_test;"\n'
+        "  Then run:         DATABASE_URL=postgresql+asyncpg://sis:sis@localhost"
+        ":5432/sis_test pytest\n\n"
+        "Override only if the target really is disposable: "
+        "SIS_ALLOW_DESTRUCTIVE_TESTS=1",
+        returncode=2,
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    _guard_test_database()
 
 
 @pytest.fixture(scope="session", autouse=True)

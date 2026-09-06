@@ -36,6 +36,12 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://sis:sis@db:5432/sis
       REDIS_URL: redis://redis:6379/0
+      # First-ADMIN web bootstrap (POST /auth/bootstrap-admin, frontend /setup).
+      # Passed through from the host env or the root .env (gitignored); empty by
+      # default, which keeps the endpoint 404 — there is no public admin signup.
+      # Without this passthrough the token cannot reach the container at all:
+      # backend/.dockerignore excludes .env, so a backend/.env never ships.
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
     ports:
       - "8000:8000"
     depends_on:
