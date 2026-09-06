@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 5 (Scheduling Engine — pure) complete and committed (`12d8f19`). Phase 6 (Calendar Integration & Scheduling Service) implemented, verified, awaiting commit approval.
+**Last updated:** 2026-09-06 — Backend Phase 6 (Calendar Integration & Scheduling Service) complete and committed (`8831f99`). Phase 7 (Booking & Conflict Prevention — **the MVP Acceptance Gate**) implemented, verified, awaiting commit approval.
 
 ---
 
@@ -178,8 +178,7 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
   - **No** migration, **no** endpoint, **no** dependency, **no** `main.py` change.
   - **Verified:** `ruff` clean; `pytest` 94 passed; demo prints 3 ranked slots deterministically.
 
-- **2026-09-06 — Backend Phase 6: Calendar Integration & Scheduling Service.**
-  *Awaiting commit approval.*
+- **2026-09-06 — Backend Phase 6: Calendar Integration & Scheduling Service.** Commit `8831f99`.
   - `backend/app/calendar/` — the **separate** Calendar OAuth flow (never merged with login):
     `client.py` (single async-`httpx` Google seam: `authorization_url` / `exchange_code` /
     `refresh` / `free_busy` + 3-try exp-backoff on transport/5xx/429; `invalid_grant`/401 →
@@ -208,11 +207,43 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     candidate (D-5 / resolves G3 — via the frozen endpoint, no new GET route invented).
   - Migration `0004` (`recommendation_runs`, `recommended_slots`). New deps: `httpx` (→ prod),
     `cryptography`.
-  - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 116 passed + 1 skipped
-    (`test_calendar` 13, `test_recommendations` 9; sandbox test `skipif`-gated); `docker compose
-    build backend` → `/health` ok, 14 routes. Token-exposure review: `decrypt()` output only ever
-    passed to the client seam; no tokens in any schema, log, audit row, or `input_snapshot`
-    (asserted).
+  - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 118 passed + 1 skipped;
+    `docker compose build backend` → `/health` ok, 14 routes.
+
+- **2026-09-06 — Backend Phase 7: Booking & Conflict Prevention (the MVP Acceptance Gate).**
+  *Awaiting commit approval.*
+  - `backend/app/booking/` — `POST /interviews/{id}/book` [ADMIN], the 8-step §10 sequence in
+    `service.py`: Redis `SET NX EX 10` lock (`app/core/locks.py`, token-guarded release; Redis
+    down → warn + proceed, the partial unique index is the guard) → re-validate slot is from the
+    latest run + request `RECOMMENDED` → conflict check (any `CONFIRMED` `interview_events`) →
+    `calendar_service.create_event` on the **first assigned panelist's** calendar (`conferenceData`
+    → Meet), **outside any DB txn** → Postgres-only persist (`interview_events` CONFIRMED +
+    status `→ BOOKED` + winning `recommended_slots.is_selected` + audit `INTERVIEW_BOOKED`) →
+    commit → release. `_compensate()` on a step-6 failure: delete the Calendar event; if that
+    also fails, `reconciliation_tasks (OPEN, external_calendar_event_id, COMPENSATING_DELETE_FAILED)`.
+    Unique-index violation in step 6 → compensate → `409 SLOT_NO_LONGER_AVAILABLE` (D-3); any other
+    step-6 failure → compensate → `500 BOOKING_PERSISTENCE_FAILED`. Success is only ever reported
+    after the commit.
+  - `app/calendar/client.py`: `create_event` / `delete_event` (+ `_post`→`_request(method,…)` for
+    DELETE; `CalendarEvent` dataclass). `app/calendar/service.py`: `create_event(access_token,…)` /
+    `delete_event(access_token,…)` / `access_token_of(conn)` — the token is captured as a local
+    **before** step 6 so a rollback (which expires the row) can't force an async lazy-load in the
+    compensation path.
+  - `models.py`: `InterviewEvent` (+ partial unique index `WHERE status='CONFIRMED'`),
+    `ReconciliationTask`. `errors.py`: `SlotNoLongerAvailableError` (409),
+    `CalendarEventCreationFailedError` (502), `BookingPersistenceFailedError` (500).
+  - `SlotOut` gained `id` (the `recommended_slot_id` `POST /book` needs — API_DESIGN's response
+    example omitted it); `POST /recommendations` and `GET /interviews/{id}` now return it from the
+    persisted rows. `GET /interviews/{id}` gained `booked_event` (D-5) for anyone who can view the
+    request. Migration `0005` (`interview_events`, `reconciliation_tasks`).
+  - `migrations/env.py`: `fileConfig(..., disable_existing_loggers=False)` — alembic's default was
+    silencing every `app.*` logger when migrations run in-process (tests, container start).
+  - **Verified:** `alembic` up/down/up clean (head `0005`); `ruff` clean; `pytest` **133 passed +
+    1 skipped** — the 4 mandatory gate tests pass (full loop → 201 + Meet link; two-booking
+    conflict via held-lock / existing-CONFIRMED / partial-unique-index backstops; DB-fail →
+    compensating delete + no success; compensating-delete-fail → `reconciliation_tasks` row + no
+    success). `docker compose build backend` → `/health` ok, 15 routes. Frozen engine files
+    unchanged. No token in any schema, log, audit row, or reconciliation metadata (asserted).
 
 ### Current backend structure
 
@@ -224,53 +255,56 @@ backend/
 │   ├── users/             # GET /users/me
 │   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
 │   ├── availability/      # POST/GET candidate availability (nested under /interviews/{id})
-│   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy (client seam, encrypted tokens)
-│   ├── scheduling/        # PURE engine (types/engine/scoring/explain) + Phase 6 layer (service/repository/router/schemas)
+│   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy + event create/delete (client seam)
+│   ├── scheduling/        # PURE engine (types/engine/scoring/explain) + layer (service/repository/router/schemas)
+│   ├── booking/           # POST /interviews/{id}/book — the 8-step compensating-action sequence
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
 │       ├── models.py      # User, CalendarConnection, InterviewRequest, InterviewParticipant,
 │       │                  #   CandidateAvailability, AvailabilityWindow, AuditLog,
-│       │                  #   RecommendationRun, RecommendedSlot
+│       │                  #   RecommendationRun, RecommendedSlot, InterviewEvent, ReconciliationTask
 │       ├── security.py    # bcrypt + JWT (+ calendar_state token)
 │       ├── crypto.py      # Fernet encrypt/decrypt for OAuth tokens at rest
+│       ├── locks.py       # redis_lock async CM (SET NX EX, token-guarded release)
 │       ├── deps.py        # get_current_user, require_role()
 │       ├── errors.py      # typed errors + global handler
 │       ├── pagination.py  # Page[T] + page_params
 │       ├── audit.py       # record_audit()
 │       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
-├── migrations/            # Alembic (env.py + versions/0001..0004)
+├── migrations/            # Alembic (env.py + versions/0001..0005)
 ├── scripts/  (seed.py, engine_demo.py)
-├── tests/  (test_health, test_security, test_auth, test_rbac, test_interviews,
-│            test_availability, test_engine, test_scoring, test_engine_purity,
-│            test_calendar, test_recommendations, test_calendar_sandbox [skipif])
+├── tests/  (…, test_calendar, test_recommendations, test_booking, test_calendar_sandbox [skipif])
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-Remaining module folders (`booking/`, `notifications/`, …) arrive with their phase,
+Remaining module folders (`notifications/`, …) arrive with their phase,
 per `CODING_GUIDELINES.md` §Modular design.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 6 — Calendar Integration & Scheduling Service** — implemented and
-  verified locally, awaiting commit approval. `app/calendar/` (OAuth connect flow + free/busy),
-  `app/core/crypto.py`, `app/scheduling/{service,repository,router,schemas}.py`, migration `0004`,
-  `GET /interviews/{id}` now carries `recommended_slots`. New deps `httpx` + `cryptography`.
-- **Phase 6 decisions taken (see §7):** D-1 httpx + Fernet, single `client.py` seam; D-2 offline
-  tests via injected fake + `skipif` sandbox test; D-3 `502 CALENDAR_SYNC_FAILED`, request stays
-  `READY_FOR_SCHEDULING`; D-4 `now(UTC)` + `existing_bookings={}` only in the Service; D-5 the
-  frozen `GET /interviews/{id}` carries `recommended_slots` (no new GET route — resolves G3);
-  D-6 signed JWT `type="calendar_state"`, 5-min TTL; D-7 `/calendar/(connected|error)` redirects;
-  D-8 dev key sentinel + production refusal; D-9 no dev-only event creation; D-10 `app/calendar/`.
-- **Next:** Phase 7 — Booking & Conflict Prevention (**the MVP Acceptance Gate**). **Do not start
-  until Phase 6 is committed.**
+- **In progress:** **Phase 7 — Booking & Conflict Prevention (the MVP Acceptance Gate)** —
+  implemented and verified locally, awaiting commit approval. `app/booking/`, `app/core/locks.py`,
+  `app/calendar/{client,service}.py` gain event create/delete, migration `0005`, `SlotOut.id` +
+  `GET /interviews/{id}.booked_event`, `migrations/env.py` logger fix.
+- **Phase 7 decisions taken (see §7):** D-1 first-panelist calendar hosts the event; D-2 Redis
+  down → proceed (unique index guards); D-3 unique-violation in step 6 → `409` not `500`; D-4
+  now(UTC)+empty existing_bookings only in the Service (Phase 5 rule unchanged); D-5 signed-JWT
+  `calendar_state` (already Phase 6); D-6 `client.py` gains event ops (allowed — it's the seam);
+  D-7 threaded race test replaced by deterministic backstops (per instruction); D-8 organiser
+  connection bad at book time → specific `424`; D-9 token-guarded lock release.
+- **MVP Acceptance Gate status:** the 4 mandatory tests pass locally. **Gate is met pending: this
+  commit + a green CI run + a real end-to-end demo against a live Google account.**
+- **Next:** Phase 8 — Booking Confirmation (SendGrid, `notification_logs`). **Do not start until
+  Phase 7 is committed and the gate is confirmed.**
 
 **MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
-interview scheduling loop from request creation to real Calendar booking."* — **not yet passed.**
-No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency/failure tests).
+interview scheduling loop from request creation to real Calendar booking."* — booking flow +
+all 4 failure/concurrency tests implemented and green locally; not yet demoed against live Google.
+No Post-MVP / Bonus work starts until the gate passes in full.
 
 ---
 
@@ -278,6 +312,28 @@ No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 7)** — Booking. **D-1:** the Calendar event is created on the **first
+  assigned panelist's** connected calendar (deterministic by user id), attendees = candidate +
+  all panelists, `conferenceData` → Meet. No new precondition — every panelist already had a
+  CONNECTED calendar for the request to reach `RECOMMENDED`. **D-2:** if Redis is unreachable at
+  lock time the booking **proceeds** (warned); the `interview_events` partial unique index
+  `WHERE status='CONFIRMED'` is the real double-booking guard, "independent of the Redis lock"
+  (DB_DESIGN.md). **D-3:** a unique-index violation during step 6 → compensate (delete the event)
+  → `409 SLOT_NO_LONGER_AVAILABLE` (it *is* "lost the race"); `500 BOOKING_PERSISTENCE_FAILED` is
+  reserved for any *other* step-6 failure. **D-4:** `book` on a request whose status ≠
+  `RECOMMENDED` → `409 SLOT_NO_LONGER_AVAILABLE` (API_DESIGN names no code for it). **D-5:** OAuth
+  `state` reuse (Phase 6) — n/a here. **D-6:** `app/calendar/client.py` gained `create_event` /
+  `delete_event` and `_post`→`_request(method,…)` — it is the designated Google seam, not the
+  frozen engine. **D-7:** the "two simultaneous bookings" gate criterion is proven by deterministic
+  backstops (held Redis lock → 409; pre-existing `CONFIRMED` event → 409; raw double-insert →
+  `UniqueViolation`), not a threaded test — a real thread race against the shared sync `TestClient`
+  deadlocks its portal. **D-8:** if the organiser panelist's connection is `REVOKED`/`EXPIRED` at
+  book time, surface that specific `424` (consistent with Phase 6), not `502`. **D-9:** the Redis
+  lock is released with a token-guarded Lua `GET`+`DEL` so a slow holder can't drop a later
+  holder's lock. Also: `SlotOut` gained `id` (the value `POST /book` takes as `recommended_slot_id`
+  — API_DESIGN's response example omitted it); `POST /book` never claims success before the
+  Postgres commit; `migrations/env.py` now passes `disable_existing_loggers=False` (alembic's
+  default was silencing `app.*` loggers when migrations run in-process).
 - **2026-09-06 (Phase 6)** — Calendar integration & the Scheduling Service. **D-1:** Google HTTP is
   `httpx` (async) behind one seam, `app/calendar/client.py`; OAuth tokens are Fernet-encrypted
   (`app/core/crypto.py`). **D-2:** every automated test injects a fake client; `test_calendar_
@@ -400,7 +456,11 @@ silently** — each item is resolved with Harshit before the phase it affects.
 
 - **C3:** `IMPLEMENTATION.md` phase-duration percentages sum to ~115% (likely intentional
   Phase 9 ∥ Phase 10 overlap). Cosmetic; add a footnote when convenient.
-- **G5:** Nothing transitions `BOOKED → COMPLETED` (no endpoint/phase/job). Treat as manual/future.
+- **G5:** Nothing transitions `BOOKED → COMPLETED` (no endpoint/phase/job). Confirmed still true
+  after Phase 7 — booking lands the request in `BOOKED`; `COMPLETED` remains manual/future.
+- **`reconciliation_tasks` (Phase 7):** rows are created on a failed compensating delete; there is
+  **no** resolution endpoint or job yet (an operator queries `WHERE status='OPEN'`). Out of scope
+  for the MVP gate.
 - **G6 — HANDLED (Phase 4).** MVP allows one submission; the `AWAITING_CANDIDATE_AVAILABILITY`
   state gate enforces it. `repository.get_latest()` already sorts by `submitted_at` desc, so the
   Post-MVP re-submission flow (Phase 9) is a state-machine change only.

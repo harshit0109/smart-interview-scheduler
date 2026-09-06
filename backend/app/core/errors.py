@@ -128,6 +128,24 @@ class CalendarSyncFailedError(AppError):
     message = "Could not retrieve calendar availability from Google. Please retry."
 
 
+class SlotNoLongerAvailableError(AppError):
+    status_code = 409
+    code = "SLOT_NO_LONGER_AVAILABLE"
+    message = "This slot is no longer available. Please choose another."
+
+
+class CalendarEventCreationFailedError(AppError):
+    status_code = 502
+    code = "CALENDAR_EVENT_CREATION_FAILED"
+    message = "The Google Calendar event could not be created. The booking did not complete."
+
+
+class BookingPersistenceFailedError(AppError):
+    status_code = 500
+    code = "BOOKING_PERSISTENCE_FAILED"
+    message = "The booking could not be saved and did not complete."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {

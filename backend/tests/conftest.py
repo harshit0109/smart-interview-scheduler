@@ -7,6 +7,7 @@ point it at a throwaway database, not a populated one.
 """
 
 import asyncio
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -18,7 +19,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.calendar.client import TokenBundle, get_calendar_client
+from app.calendar.client import CalendarEvent, TokenBundle, get_calendar_client
 from app.core.config import settings
 from app.core.crypto import encrypt
 from app.core.security import create_access_token
@@ -59,9 +60,12 @@ def db_exec():
     def _exec(sql: str, params: dict | None = None) -> None:
         async def _go() -> None:
             eng = create_async_engine(settings.database_url)
-            async with eng.begin() as conn:
-                await conn.execute(text(sql), params or {})
-            await eng.dispose()
+            try:
+                async with eng.begin() as conn:
+                    await conn.execute(text(sql), params or {})
+            finally:
+                await eng.dispose()  # must run even on error, or a leaked
+                # connection can hold a lock and hang the next TRUNCATE
 
         asyncio.run(_go())
 
@@ -75,10 +79,11 @@ def db_val():
     def _val(sql: str, params: dict | None = None):
         async def _go():
             eng = create_async_engine(settings.database_url)
-            async with eng.connect() as conn:
-                v = await conn.scalar(text(sql), params or {})
-            await eng.dispose()
-            return v
+            try:
+                async with eng.connect() as conn:
+                    return await conn.scalar(text(sql), params or {})
+            finally:
+                await eng.dispose()
 
         return asyncio.run(_go())
 
@@ -166,6 +171,10 @@ class FakeCalendarClient:
         self.exchange_result: object = None
         self.refresh_result: object = None
         self.free_busy_result: object = None  # list[BusyInterval] | Exception | callable
+        self.create_event_result: object = None  # CalendarEvent | Exception
+        self.delete_event_result: object = None  # None | Exception
+        self.created_events: list[dict] = []
+        self.deleted_event_ids: list[str] = []
 
     def authorization_url(self, state: str) -> str:
         scopes = "https://www.googleapis.com/auth/calendar.freebusy%20" \
@@ -191,6 +200,26 @@ class FakeCalendarClient:
             return list(r(time_min, time_max))
         return list(r or [])
 
+    async def create_event(
+        self, access_token, *, summary, description, start, end, attendee_emails
+    ) -> CalendarEvent:
+        self.created_events.append(
+            {"summary": summary, "start": start, "end": end, "attendees": list(attendee_emails)}
+        )
+        return self._resolve(
+            self.create_event_result,
+            CalendarEvent(
+                event_id=f"evt-{uuid.uuid4().hex[:12]}",
+                meeting_link="https://meet.google.com/fake-abc-defg",
+                html_link="https://calendar.google.com/event?eid=fake",
+            ),
+        )
+
+    async def delete_event(self, access_token, event_id: str) -> None:
+        self.deleted_event_ids.append(event_id)
+        if isinstance(self.delete_event_result, BaseException):
+            raise self.delete_event_result
+
     @staticmethod
     def _resolve(value, default):
         if isinstance(value, BaseException):
@@ -205,3 +234,29 @@ def fake_calendar():
     app.dependency_overrides[get_calendar_client] = lambda: fake
     yield fake
     app.dependency_overrides.pop(get_calendar_client, None)
+
+
+class _RecordCollector(logging.Handler):
+    """Installed once, at import time, directly on the `app` logger. Bypasses
+    pytest's logging plumbing and works from the TestClient portal thread."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+_APP_LOG_COLLECTOR = _RecordCollector()
+_app_logger = logging.getLogger("app")
+_app_logger.addHandler(_APP_LOG_COLLECTOR)
+_app_logger.setLevel(logging.DEBUG)
+
+
+@pytest.fixture
+def app_logs():
+    """Per-test view of `app.*` log records, cleared at setup."""
+    _APP_LOG_COLLECTOR.records.clear()
+    yield _APP_LOG_COLLECTOR.records
+    _APP_LOG_COLLECTOR.records.clear()

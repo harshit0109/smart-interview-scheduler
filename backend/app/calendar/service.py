@@ -18,6 +18,7 @@ from app.calendar import repository, schemas
 from app.calendar.client import (
     BusyInterval,
     CalendarAuthError,
+    CalendarEvent,
     CalendarTransportError,
     GoogleCalendarClient,
     TokenBundle,
@@ -29,6 +30,7 @@ from app.core.crypto import decrypt, encrypt
 from app.core.errors import (
     CalendarConnectionExpiredError,
     CalendarConnectionRevokedError,
+    CalendarEventCreationFailedError,
     CalendarSyncFailedError,
     PanelistCalendarNotConnectedError,
 )
@@ -205,3 +207,50 @@ async def get_free_busy(
     except Exception:  # noqa: BLE001
         pass
     return busy
+
+
+# ---------------------------------------------------------------- event ops -----
+
+
+def access_token_of(conn: CalendarConnection) -> str:
+    """Decrypt a connection's access token. Call it while `conn` is still loaded
+    (before any rollback) and hold the result as a local — never re-read the row
+    in a failure path."""
+    return decrypt(conn.access_token_encrypted or "")
+
+
+async def create_event(
+    access_token: str,
+    client: GoogleCalendarClient,
+    *,
+    summary: str,
+    description: str,
+    start: datetime,
+    end: datetime,
+    attendee_emails: list[str],
+) -> CalendarEvent:
+    """Create the booked event. Raises CalendarEventCreationFailedError (502) on
+    any Google failure after retries."""
+    try:
+        return await client.create_event(
+            access_token,
+            summary=summary,
+            description=description,
+            start=start,
+            end=end,
+            attendee_emails=attendee_emails,
+        )
+    except (CalendarAuthError, CalendarTransportError) as exc:
+        raise CalendarEventCreationFailedError() from exc
+
+
+async def delete_event(
+    access_token: str, client: GoogleCalendarClient, event_id: str
+) -> bool:
+    """Best-effort delete for the compensating action. Returns True if the event
+    is gone, False if the delete could not be completed."""
+    try:
+        await client.delete_event(access_token, event_id)
+        return True
+    except (CalendarAuthError, CalendarTransportError):
+        return False

@@ -4,6 +4,7 @@ Phase 2 owns `users` + `calendar_connections` (the latter schema-only until
 Phase 6). Phase 3 adds `interview_requests`, `interview_participants`,
 `audit_logs`. Phase 4 adds `candidate_availability`, `availability_windows`.
 Phase 6 adds `recommendation_runs`, `recommended_slots`.
+Phase 7 adds `interview_events`, `reconciliation_tasks`.
 """
 
 import uuid
@@ -15,12 +16,14 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -328,3 +331,81 @@ class RecommendedSlot(Base):
     )
 
     run: Mapped["RecommendationRun"] = relationship(back_populates="slots")
+
+
+class InterviewEvent(Base):
+    """The booked, calendar-confirmed outcome. The Calendar event is created
+    first (outside any DB transaction) — `calendar_event_id` is always populated
+    before this row is inserted (DB_DESIGN.md §Concurrency Strategy)."""
+
+    __tablename__ = "interview_events"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('CONFIRMED','CANCELLED')", name="ck_interview_events_status"
+        ),
+        # Final line of defense against a double booking, independent of the
+        # Redis lock: at most one CONFIRMED event per request.
+        Index(
+            "uq_interview_events_one_confirmed",
+            "interview_request_id",
+            unique=True,
+            postgresql_where=text("status = 'CONFIRMED'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    calendar_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    meeting_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="CONFIRMED"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ReconciliationTask(Base):
+    """A Calendar event that was created but whose compensating delete also
+    failed — an orphaned event needing manual/retry cleanup (requirements.md §10)."""
+
+    __tablename__ = "reconciliation_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('OPEN','RESOLVED')", name="ck_reconciliation_tasks_status"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_events.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    external_calendar_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="OPEN", index=True
+    )
+    task_metadata: Mapped[dict] = mapped_column(
+        "metadata", JSONB, nullable=False, server_default="{}"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

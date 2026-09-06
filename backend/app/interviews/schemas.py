@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.booking.schemas import InterviewEventOut
 from app.scheduling.schemas import SlotOut
 
 RoundType = Literal["SCREENING", "TECHNICAL", "MANAGERIAL", "HR"]
@@ -62,3 +63,6 @@ class InterviewRequestOut(BaseModel):
     # candidate (requirements.md §4). None when no run exists or the caller is a
     # panelist. API_DESIGN.md routes recommendation viewing through this endpoint.
     recommended_slots: list[SlotOut] | None = None
+    # The CONFIRMED interview_events row once booked; visible to anyone who can
+    # view the request (API_DESIGN.md "... + interview_events (if booked)").
+    booked_event: InterviewEventOut | None = None

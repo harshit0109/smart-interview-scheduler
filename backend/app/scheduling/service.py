@@ -214,18 +214,21 @@ async def generate(
         request_id, run.id, len(result.slots),
     )
 
+    # Build the response from the PERSISTED rows so callers get real slot ids
+    # (POST /book takes one as `recommended_slot_id`).
     return schemas.RecommendationResponse(
         recommendation_run_id=run.id,
         slots=[
             schemas.SlotOut(
+                id=s.id,
                 start_time=s.start_time,
                 end_time=s.end_time,
-                total_score=s.total_score,
-                score_breakdown=s.score_breakdown.as_dict(),
+                total_score=float(s.total_score),
+                score_breakdown=s.score_breakdown,
                 explanation=s.explanation,
                 rank=s.rank,
             )
-            for s in result.slots
+            for s in run.slots
         ],
     )
 

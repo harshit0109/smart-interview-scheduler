@@ -13,7 +13,9 @@ from app.core.models import Base
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers defaults to True, which would silence the app's
+    # own loggers when migrations run in-process (tests, container startup).
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

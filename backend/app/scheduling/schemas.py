@@ -12,6 +12,9 @@ from pydantic import BaseModel
 
 
 class SlotOut(BaseModel):
+    # The persisted recommended_slots row id — the value POST /book takes as
+    # `recommended_slot_id`. (API_DESIGN.md's response example omits it.)
+    id: uuid.UUID
     start_time: datetime
     end_time: datetime
     total_score: float

@@ -1,13 +1,15 @@
-"""The single Google HTTP seam: auth-URL building, token exchange/refresh, freeBusy.
+"""The single Google HTTP seam: auth-URL building, token exchange/refresh, freeBusy,
+event create/delete.
 
 Everything network-facing for Calendar lives here so the rest of the codebase —
-and every test — can substitute a fake with the same four methods. Tokens passed
-through here are never logged.
+and every test — can substitute a fake with the same method surface. Access
+tokens pass through as function arguments and are never logged.
 """
 
 import asyncio
+import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 import httpx
@@ -17,6 +19,7 @@ from app.core.config import settings
 _AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _FREEBUSY_URI = "https://www.googleapis.com/calendar/v3/freeBusy"
+_EVENTS_URI = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 
 CALENDAR_SCOPES = (
     "https://www.googleapis.com/auth/calendar.freebusy",
@@ -48,6 +51,13 @@ class TokenBundle:
 class BusyInterval:
     start: datetime
     end: datetime
+
+
+@dataclass(frozen=True)
+class CalendarEvent:
+    event_id: str
+    meeting_link: str | None
+    html_link: str | None
 
 
 class GoogleCalendarClient:
@@ -140,6 +150,57 @@ class GoogleCalendarClient:
             )
         return out
 
+    # -------------------------------------------------------------- calendar ops -
+
+    async def create_event(
+        self,
+        access_token: str,
+        *,
+        summary: str,
+        description: str,
+        start: datetime,
+        end: datetime,
+        attendee_emails: list[str],
+    ) -> CalendarEvent:
+        request_id = uuid.uuid4().hex
+        resp = await self._request(
+            "POST",
+            f"{_EVENTS_URI}?conferenceDataVersion=1&sendUpdates=all",
+            json={
+                "summary": summary,
+                "description": description,
+                "start": {"dateTime": start.astimezone(UTC).isoformat()},
+                "end": {"dateTime": end.astimezone(UTC).isoformat()},
+                "attendees": [{"email": e} for e in attendee_emails],
+                "conferenceData": {
+                    "createRequest": {
+                        "requestId": request_id,
+                        "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                    }
+                },
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        body = resp.json()
+        link = body.get("hangoutLink")
+        if not link:
+            for ep in body.get("conferenceData", {}).get("entryPoints", []):
+                if ep.get("entryPointType") == "video" and ep.get("uri"):
+                    link = ep["uri"]
+                    break
+        return CalendarEvent(
+            event_id=body["id"], meeting_link=link, html_link=body.get("htmlLink")
+        )
+
+    async def delete_event(self, access_token: str, event_id: str) -> None:
+        # 404 / 410 => the event is already gone; treat as a successful delete.
+        await self._request(
+            "DELETE",
+            f"{_EVENTS_URI}/{event_id}?sendUpdates=all",
+            headers={"Authorization": f"Bearer {access_token}"},
+            ok_statuses=(404, 410),
+        )
+
     # ------------------------------------------------------------ retry wrapper -
 
     async def _post(
@@ -150,17 +211,31 @@ class GoogleCalendarClient:
         json: dict | None = None,
         headers: dict | None = None,
     ) -> httpx.Response:
+        return await self._request("POST", url, data=data, json=json, headers=headers)
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        data: dict | None = None,
+        json: dict | None = None,
+        headers: dict | None = None,
+        ok_statuses: tuple[int, ...] = (),
+    ) -> httpx.Response:
         last_exc: Exception | None = None
         for attempt in range(_RETRY_ATTEMPTS):
             try:
                 async with httpx.AsyncClient(
                     timeout=_TIMEOUT, transport=self._transport
                 ) as http:
-                    resp = await http.post(url, data=data, json=json, headers=headers)
+                    resp = await http.request(
+                        method, url, data=data, json=json, headers=headers
+                    )
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_exc = exc
             else:
-                if resp.status_code < 400:
+                if resp.status_code < 400 or resp.status_code in ok_statuses:
                     return resp
                 if resp.status_code in (400, 401):
                     body = _safe_json(resp)

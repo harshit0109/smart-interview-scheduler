@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from app.auth.router import router as auth_router
 from app.availability.router import router as availability_router
+from app.booking.router import router as booking_router
 from app.calendar.router import router as calendar_router
 from app.core.db import engine
 from app.core.errors import register_exception_handlers
@@ -40,6 +41,7 @@ app.include_router(interviews_router, prefix=API_V1)
 app.include_router(availability_router, prefix=API_V1)
 app.include_router(calendar_router, prefix=API_V1)
 app.include_router(scheduling_router, prefix=API_V1)
+app.include_router(booking_router, prefix=API_V1)
 
 
 async def _check_database() -> str:

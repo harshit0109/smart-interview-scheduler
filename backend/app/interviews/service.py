@@ -5,6 +5,8 @@ from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.booking import repository as booking_repository
+from app.booking.schemas import InterviewEventOut
 from app.core.audit import record_audit
 from app.core.errors import (
     InvalidParticipantError,
@@ -119,6 +121,7 @@ async def get_request(
         if run is not None:
             out.recommended_slots = [
                 SlotOut(
+                    id=s.id,
                     start_time=s.start_time,
                     end_time=s.end_time,
                     total_score=float(s.total_score),
@@ -128,6 +131,19 @@ async def get_request(
                 )
                 for s in run.slots
             ]
+    # Anyone who can view the request sees the booked event (API_DESIGN.md).
+    event = await booking_repository.get_confirmed_event(db, request_id)
+    if event is not None:
+        out.booked_event = InterviewEventOut(
+            id=event.id,
+            interview_request_id=event.interview_request_id,
+            start_time=event.start_time,
+            end_time=event.end_time,
+            calendar_event_id=event.calendar_event_id,
+            meeting_link=event.meeting_link,
+            status=event.status,
+            created_at=event.created_at,
+        )
     return out
 
 
