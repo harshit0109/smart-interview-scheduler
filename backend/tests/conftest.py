@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.crypto import encrypt
 from app.core.security import create_access_token
 from app.main import app
+from app.notifications.client import get_sendgrid_client
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -234,6 +235,31 @@ def fake_calendar():
     app.dependency_overrides[get_calendar_client] = lambda: fake
     yield fake
     app.dependency_overrides.pop(get_calendar_client, None)
+
+
+class FakeSendGrid:
+    """Stand-in for SendGridClient. `configured=False` -> the SIMULATED path;
+    `configured=True` + `fail=True` -> send() raises (FAILED path)."""
+
+    def __init__(self) -> None:
+        self.configured = False
+        self.fail = False
+        self.sent: list = []
+
+    async def send(self, msg) -> None:
+        self.sent.append(msg)
+        if self.fail:
+            raise RuntimeError("sendgrid boom")
+
+
+@pytest.fixture
+def fake_sendgrid():
+    """Opt-in: install a FakeSendGrid. Without it, the real client sees an empty
+    API key and takes the SIMULATED path (no network) — fine for booking tests."""
+    fake = FakeSendGrid()
+    app.dependency_overrides[get_sendgrid_client] = lambda: fake
+    yield fake
+    app.dependency_overrides.pop(get_sendgrid_client, None)
 
 
 class _RecordCollector(logging.Handler):

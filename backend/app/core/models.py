@@ -409,3 +409,41 @@ class ReconciliationTask(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class NotificationLog(Base):
+    """Delivery record for a booking-confirmation attempt (FR-030).
+
+    MVP writes exactly one CONFIRMATION row per successful booking; reminders and
+    decline/cancel notices are Post-MVP. `status` is SENT / FAILED / SIMULATED
+    (the last covers the documented logged fallback, requirements.md §5)."""
+
+    __tablename__ = "notification_logs"
+    __table_args__ = (
+        CheckConstraint("channel IN ('EMAIL')", name="ck_notification_logs_channel"),
+        CheckConstraint(
+            "notification_type IN "
+            "('CONFIRMATION','REMINDER','DECLINE','CANCELLATION','RESCHEDULE')",
+            name="ck_notification_logs_type",
+        ),
+        CheckConstraint(
+            "status IN ('SENT','FAILED','SIMULATED')", name="ck_notification_logs_status"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    channel: Mapped[str] = mapped_column(String(10), nullable=False)
+    notification_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

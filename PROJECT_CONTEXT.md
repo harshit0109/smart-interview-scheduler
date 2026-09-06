@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 6 (Calendar Integration & Scheduling Service) complete and committed (`8831f99`). Phase 7 (Booking & Conflict Prevention — **the MVP Acceptance Gate**) implemented, verified, awaiting commit approval.
+**Last updated:** 2026-09-06 — Backend Phase 7 (Booking & Conflict Prevention — **the MVP Acceptance Gate**) complete and committed (`82764be`); gate met locally. Phase 8 (Booking Confirmation) implemented, verified, awaiting commit approval.
 
 ---
 
@@ -244,6 +244,28 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     compensating delete + no success; compensating-delete-fail → `reconciliation_tasks` row + no
     success). `docker compose build backend` → `/health` ok, 15 routes. Frozen engine files
     unchanged. No token in any schema, log, audit row, or reconciliation metadata (asserted).
+  - **Committed `82764be`.**
+
+- **2026-09-06 — Backend Phase 8: Booking Confirmation (FR-030).** *Awaiting commit approval.*
+  - `backend/app/notifications/` — confirmation email only. `client.py` (single SendGrid HTTP seam,
+    one `httpx` POST, no vendor SDK; `configured` = has an API key), `service.py`
+    (`send_booking_confirmation` — **never raises**: `SIMULATED` when no API key [logs the full
+    "would send" content], `SENT` on a 2xx, `FAILED` on any send error; then writes **exactly one**
+    `notification_logs` CONFIRMATION row + commits), `repository.py`.
+  - Wired into `app/booking/service.book()` **after the step-7 commit**: the dispatch is wrapped in
+    a `try/except` that only logs — a confirmation failure can never roll back or fail the booking.
+    `booking/router.py` injects `get_sendgrid_client`. One row per booking, `recipient` = the
+    candidate's email (panelists already got the Google Calendar invite via `sendUpdates=all`).
+  - `models.py`: `NotificationLog` (channel `EMAIL`, type CHECK incl. the four Post-MVP types but
+    MVP writes only `CONFIRMATION`, status `SENT|FAILED|SIMULATED`). Migration `0006`
+    (`notification_logs`). `config.py`: `sendgrid_api_key` (empty ⇒ SIMULATED), `email_from_address`.
+  - **No new public endpoint.** Reminders / decline / cancel / SMS / WhatsApp explicitly out of scope.
+  - **Verified:** `alembic` up/down/up clean (head `0006`); `ruff` clean; `pytest` **141 passed +
+    1 skipped** (`test_notifications` 8: SIMULATED / SENT / FAILED paths, exactly-one-row,
+    failed-booking-writes-nothing, dispatch-exception-doesn't-break-booking, SendGrid payload +
+    error-status units). `docker compose build backend` → `/health` ok, **15 routes unchanged**.
+    Frozen engine unchanged. `SENDGRID_API_KEY` never appears in a log line (FAILED logs only the
+    exception type).
 
 ### Current backend structure
 
@@ -258,6 +280,7 @@ backend/
 │   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy + event create/delete (client seam)
 │   ├── scheduling/        # PURE engine (types/engine/scoring/explain) + layer (service/repository/router/schemas)
 │   ├── booking/           # POST /interviews/{id}/book — the 8-step compensating-action sequence
+│   ├── notifications/     # booking-confirmation email (SendGrid seam; no endpoint)
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
@@ -273,38 +296,37 @@ backend/
 │       ├── audit.py       # record_audit()
 │       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
-├── migrations/            # Alembic (env.py + versions/0001..0005)
+├── migrations/            # Alembic (env.py + versions/0001..0006)
 ├── scripts/  (seed.py, engine_demo.py)
-├── tests/  (…, test_calendar, test_recommendations, test_booking, test_calendar_sandbox [skipif])
+├── tests/  (…, test_calendar, test_recommendations, test_booking, test_notifications,
+│            test_calendar_sandbox [skipif])
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-Remaining module folders (`notifications/`, …) arrive with their phase,
-per `CODING_GUIDELINES.md` §Modular design.
+All MVP module folders now exist. Post-MVP (Phase 9) reuses the existing schema —
+no new module folders expected until then.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 7 — Booking & Conflict Prevention (the MVP Acceptance Gate)** —
-  implemented and verified locally, awaiting commit approval. `app/booking/`, `app/core/locks.py`,
-  `app/calendar/{client,service}.py` gain event create/delete, migration `0005`, `SlotOut.id` +
-  `GET /interviews/{id}.booked_event`, `migrations/env.py` logger fix.
-- **Phase 7 decisions taken (see §7):** D-1 first-panelist calendar hosts the event; D-2 Redis
-  down → proceed (unique index guards); D-3 unique-violation in step 6 → `409` not `500`; D-4
-  now(UTC)+empty existing_bookings only in the Service (Phase 5 rule unchanged); D-5 signed-JWT
-  `calendar_state` (already Phase 6); D-6 `client.py` gains event ops (allowed — it's the seam);
-  D-7 threaded race test replaced by deterministic backstops (per instruction); D-8 organiser
-  connection bad at book time → specific `424`; D-9 token-guarded lock release.
-- **MVP Acceptance Gate status:** the 4 mandatory tests pass locally. **Gate is met pending: this
-  commit + a green CI run + a real end-to-end demo against a live Google account.**
-- **Next:** Phase 8 — Booking Confirmation (SendGrid, `notification_logs`). **Do not start until
-  Phase 7 is committed and the gate is confirmed.**
-
-**MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
-interview scheduling loop from request creation to real Calendar booking."* — booking flow +
-all 4 failure/concurrency tests implemented and green locally; not yet demoed against live Google.
-No Post-MVP / Bonus work starts until the gate passes in full.
+- **In progress:** **Phase 8 — Booking Confirmation** — implemented and verified locally,
+  awaiting commit approval. `app/notifications/` (SendGrid seam + service + repo), migration
+  `0006` (`notification_logs`), dispatch wired into `booking/service.book()` after the commit,
+  `config.py` gains `sendgrid_api_key` / `email_from_address`. No new endpoint.
+- **Phase 8 decisions taken (see §7):** N-1 one `notification_logs` row per booking (not per
+  recipient), `recipient` = candidate email; N-2 no `sendgrid` SDK — one `httpx` POST behind the
+  usual client seam; N-3 empty `SENDGRID_API_KEY` ⇒ `SIMULATED` (default in dev/CI), a real key ⇒
+  attempt `SENT`, any failure ⇒ `FAILED`; N-4 the dispatch never raises out of `book()` — a
+  confirmation failure cannot roll back or fail the booking.
+- **MVP Acceptance Gate status:** Phase 7's 4 mandatory tests pass locally and are committed
+  (`82764be`). Phase 8's degradation path (SIMULATED) is complete, so the confirmation step of the
+  Core Demo Loop is satisfied without blocking the gate (requirements.md §5). **Remaining before
+  the gate is fully signed off: a green CI run + a real end-to-end demo against a live Google
+  account** (and, optionally, a real SendGrid key for a live `SENT`).
+- **Next:** Phase 9 — **POST-MVP** (decline / cancel / reschedule / reminders / audit view).
+  **Must not start until Phase 7's gate is confirmed in full** — this is the one hard rule in
+  `IMPLEMENTATION.md`.
 
 ---
 
@@ -312,6 +334,19 @@ No Post-MVP / Bonus work starts until the gate passes in full.
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 8)** — Booking confirmation. **N-1:** **one** `notification_logs` row per
+  booking (the acceptance criterion says "exactly one"), `recipient` = the candidate's email; the
+  panelists already receive the Google Calendar invite (Phase 7 sends with `sendUpdates=all`). The
+  email itself `cc`s the panelists. **N-2:** no `sendgrid` SDK — one `httpx` POST to
+  `api.sendgrid.com/v3/mail/send` behind the standard client seam (`app/notifications/client.py`),
+  injectable for tests. **N-3:** empty `SENDGRID_API_KEY` (dev/CI default) ⇒ status `SIMULATED`
+  with the full "would-send" body logged at INFO; a real key ⇒ `SENT` on 2xx, `FAILED` on any
+  send error. This is the requirements.md §5 documented degradation path; it does **not** block
+  the MVP gate. **N-4:** `send_booking_confirmation` never raises, and `book()` wraps the whole
+  dispatch in a `try/except` that only logs — a confirmation failure can never roll back or affect
+  the already-committed booking. Trade-off: if the DB is unavailable for the notification write
+  itself, the booking still succeeds and the missing row is logged loudly (booking success is the
+  priority, per the phase brief).
 - **2026-09-06 (Phase 7)** — Booking. **D-1:** the Calendar event is created on the **first
   assigned panelist's** connected calendar (deterministic by user id), attendees = candidate +
   all panelists, `conferenceData` → Meet. No new precondition — every panelist already had a

@@ -41,5 +41,10 @@ class Settings(BaseSettings):
     # Where GET /calendar/callback redirects the browser back to.
     frontend_base_url: str = "http://localhost:3000"
 
+    # Booking-confirmation email (Phase 8). Empty API key -> the confirmation is
+    # logged and recorded as SIMULATED (requirements.md §5 documented fallback).
+    sendgrid_api_key: str = ""
+    email_from_address: str = "no-reply@smart-interview-scheduler.example"
+
 
 settings = Settings()

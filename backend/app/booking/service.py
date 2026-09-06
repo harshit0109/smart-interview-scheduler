@@ -24,6 +24,8 @@ from app.core.errors import (
 )
 from app.core.locks import LockNotAcquired, redis_lock
 from app.core.models import CalendarConnection, InterviewParticipant, InterviewRequest, User
+from app.notifications import service as notifications_service
+from app.notifications.client import SendGridClient
 
 logger = logging.getLogger("app.booking")
 
@@ -70,6 +72,7 @@ async def book(
     request_id: uuid.UUID,
     slot_id: uuid.UUID,
     client: GoogleCalendarClient,
+    sendgrid: SendGridClient,
 ) -> schemas.InterviewEventOut:
     slot = await repository.get_slot_with_run(db, slot_id)
     if slot is None or slot.run.interview_request_id != request_id:
@@ -95,6 +98,11 @@ async def book(
             parts = await repository.participants_with_users(db, request_id)
             panelists = [(p, u) for p, u in parts if p.role_in_interview == "PANELIST"]
             candidate = next(u for p, u in parts if p.role_in_interview == "CANDIDATE")
+            # Plain strings captured before step 6 — used for the post-commit
+            # confirmation, safe against a rollback expiring the ORM rows.
+            candidate_email = candidate.email
+            panelist_emails = [u.email for _p, u in panelists]
+            round_type = request.round_type
             organiser = await _organiser_connection(db, panelists, client)
             # Capture the token now, while `organiser` is loaded — a later rollback
             # expires the row and an implicit reload would fail in async context.
@@ -154,6 +162,23 @@ async def book(
         "booking.confirmed request_id=%s event_id=%s calendar_event_id=%s",
         request_id, event.id, cal.event_id,
     )
+
+    # Step 10 of the Core Demo Loop — confirmation. Booking is already durable;
+    # a failure here is logged and never propagated (requirements.md §5, FR-030).
+    try:
+        await notifications_service.send_booking_confirmation(
+            db,
+            event,
+            candidate_email=candidate_email,
+            panelist_emails=panelist_emails,
+            round_type=round_type,
+            client=sendgrid,
+        )
+    except Exception:  # noqa: BLE001 - the booking succeeded; never let this undo it
+        logger.error(
+            "booking.confirmation_dispatch_failed event_id=%s", event.id, exc_info=True
+        )
+
     return _to_out(event)
 
 
