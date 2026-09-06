@@ -146,6 +146,18 @@ class BookingPersistenceFailedError(AppError):
     message = "The booking could not be saved and did not complete."
 
 
+class NotBookedError(AppError):
+    status_code = 409
+    code = "NOT_BOOKED"
+    message = "This interview request has no booked slot to reschedule."
+
+
+class RequestAlreadyTerminalError(AppError):
+    status_code = 409
+    code = "REQUEST_ALREADY_TERMINAL"
+    message = "This interview request is already cancelled or completed."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {

@@ -273,10 +273,12 @@ def test_compensating_delete_failure_creates_reconciliation_task(
 # ============================================================ supporting =======
 
 
-def test_book_requires_admin(client, make_user, make_calendar_connection, fake_calendar):
+def test_book_authorization(client, make_user, make_calendar_connection, fake_calendar):
+    # Phase 9 item 4 widened /book to ADMIN or the request's own candidate.
     ctx = _recommended(client, make_user, make_calendar_connection, fake_calendar)
-    for actor in (ctx.candidate, ctx.panelists[0]):
-        assert _book(client, ctx, ctx.slots[0]["id"], actor=actor).status_code == 403
+    other_candidate = make_user("CANDIDATE")
+    assert _book(client, ctx, ctx.slots[0]["id"], actor=ctx.panelists[0]).status_code == 403
+    assert _book(client, ctx, ctx.slots[0]["id"], actor=other_candidate).status_code == 403
 
 
 def test_book_unknown_slot_404(client, make_user, make_calendar_connection, fake_calendar):

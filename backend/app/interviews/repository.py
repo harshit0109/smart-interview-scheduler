@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.models import InterviewParticipant, InterviewRequest, User
+from app.core.models import AuditLog, InterviewParticipant, InterviewRequest, User
 
 _WITH_PARTICIPANTS = selectinload(InterviewRequest.participants)
 
@@ -16,6 +16,24 @@ async def get_users(db: AsyncSession, ids: Sequence[uuid.UUID]) -> list[User]:
     if not ids:
         return []
     return list(await db.scalars(select(User).where(User.id.in_(ids))))
+
+
+async def list_audit(
+    db: AsyncSession, request_id: uuid.UUID, *, offset: int, limit: int
+) -> tuple[list[AuditLog], int]:
+    where = (
+        AuditLog.entity_type == "interview_request",
+        AuditLog.entity_id == request_id,
+    )
+    total = await db.scalar(select(func.count()).select_from(AuditLog).where(*where))
+    rows = await db.scalars(
+        select(AuditLog)
+        .where(*where)
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(rows), int(total or 0)
 
 
 async def get(db: AsyncSession, request_id: uuid.UUID) -> InterviewRequest | None:

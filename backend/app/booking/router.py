@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.booking import schemas, service
 from app.calendar.client import GoogleCalendarClient, get_calendar_client
 from app.core.db import get_db
-from app.core.deps import CurrentUser, require_role
+from app.core.deps import CurrentUser, admin_or_owning_candidate
 from app.notifications.client import SendGridClient, get_sendgrid_client
 
 router = APIRouter(prefix="/interviews/{request_id}", tags=["booking"])
@@ -23,7 +23,8 @@ SendGridDep = Annotated[SendGridClient, Depends(get_sendgrid_client)]
     "/book",
     response_model=schemas.InterviewEventOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_role("ADMIN"))],
+    # ADMIN, or the request's own candidate (Post-MVP self-service, Phase 9 item 4).
+    dependencies=[Depends(admin_or_owning_candidate())],
 )
 async def book(
     request_id: uuid.UUID,

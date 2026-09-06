@@ -121,10 +121,12 @@ def test_input_snapshot_carries_no_tokens(
 # ---------------------------------------------------------------------- rbac ----
 
 
-def test_recommendations_requires_admin(client, make_user, make_calendar_connection, fake_calendar):
+def test_recommendations_authorization(client, make_user, make_calendar_connection, fake_calendar):
+    # Phase 9 item 4 widened /recommendations to ADMIN or the request's own candidate.
     ctx = _ready_request(client, make_user, make_calendar_connection)
     fake_calendar.free_busy_result = []
-    for actor in (ctx.candidate, ctx.panelists[0]):
+    other_candidate = make_user("CANDIDATE")
+    for actor in (other_candidate, ctx.panelists[0]):
         resp = client.post(
             f"{V1}/interviews/{ctx.rid}/recommendations", headers=actor.headers
         )

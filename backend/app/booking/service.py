@@ -50,13 +50,14 @@ def _to_out(event) -> schemas.InterviewEventOut:
     )
 
 
-async def _organiser_connection(
+async def organiser_connection(
     db: AsyncSession,
     panelists: list[tuple[InterviewParticipant, User]],
     client: GoogleCalendarClient,
 ) -> CalendarConnection:
     """The event is hosted on the first assigned panelist's calendar (D-1),
-    deterministic by user id. A bad connection surfaces its specific 424 (D-8)."""
+    deterministic by user id. A bad connection surfaces its specific 424 (D-8).
+    Reused by the Phase 9 lifecycle flows to cancel the event."""
     _p, user = sorted(panelists, key=lambda pu: str(pu[1].id))[0]
     conn = await calendar_repository.get_by_user(db, user.id)
     if conn is None:
@@ -103,7 +104,7 @@ async def book(
             candidate_email = candidate.email
             panelist_emails = [u.email for _p, u in panelists]
             round_type = request.round_type
-            organiser = await _organiser_connection(db, panelists, client)
+            organiser = await organiser_connection(db, panelists, client)
             # Capture the token now, while `organiser` is loaded — a later rollback
             # expires the row and an implicit reload would fail in async context.
             organiser_token = calendar_service.access_token_of(organiser)

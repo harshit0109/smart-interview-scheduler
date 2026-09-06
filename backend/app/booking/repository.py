@@ -88,6 +88,7 @@ async def create_reconciliation_task(
     reason: str,
     metadata: dict,
     interview_event_id: uuid.UUID | None = None,
+    commit: bool = True,
 ) -> ReconciliationTask:
     task = ReconciliationTask(
         interview_event_id=interview_event_id,
@@ -97,5 +98,8 @@ async def create_reconciliation_task(
         task_metadata=metadata,
     )
     db.add(task)
-    await db.commit()
+    if commit:
+        await db.commit()  # Phase 7 compensation runs after a rollback — needs its own commit
+    else:
+        await db.flush()  # Phase 9 lifecycle is mid-transaction; caller commits
     return task

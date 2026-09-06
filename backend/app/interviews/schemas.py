@@ -66,3 +66,25 @@ class InterviewRequestOut(BaseModel):
     # The CONFIRMED interview_events row once booked; visible to anyone who can
     # view the request (API_DESIGN.md "... + interview_events (if booked)").
     booked_event: InterviewEventOut | None = None
+
+
+# ----------------------------------------------- Phase 9 lifecycle + audit ------
+
+
+class LifecycleRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class LifecycleStatusResponse(BaseModel):
+    interview_request_status: str
+
+
+class AuditEntryOut(BaseModel):
+    id: uuid.UUID
+    actor_id: uuid.UUID | None
+    actor_role: str
+    action: str
+    entity_type: str
+    entity_id: uuid.UUID
+    metadata: dict
+    created_at: datetime

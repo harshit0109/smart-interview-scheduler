@@ -1,9 +1,10 @@
-"""Booking-confirmation dispatch.
+"""Notification dispatch — booking confirmation (Phase 8) and lifecycle notices
+(Phase 9: decline / reschedule / cancellation / reminder).
 
-`send_booking_confirmation` is called by the booking service *after* the booking
-commit. It never raises: whatever happens, it writes exactly one CONFIRMATION
-row (SENT / FAILED / SIMULATED) and commits it. The booking's success is already
-durable and is unaffected.
+Callers invoke this *after* their own commit. `_dispatch` never raises: whatever
+happens it writes exactly one `notification_logs` row (SENT / FAILED / SIMULATED)
+for the given `interview_event_id` and commits it. The triggering action's
+success is already durable and is unaffected.
 """
 
 import logging
@@ -16,25 +17,57 @@ from app.notifications.client import EmailMessage, SendGridClient
 
 logger = logging.getLogger("app.notifications")
 
+_LIFECYCLE_COPY = {
+    "DECLINE": ("Interview needs rescheduling", "an interviewer has declined this time"),
+    "RESCHEDULE": ("Interview reschedule requested", "a reschedule has been requested"),
+    "CANCELLATION": ("Interview cancelled", "this interview has been cancelled"),
+    "REMINDER": ("Interview reminder", "this is a reminder for your upcoming interview"),
+}
 
-def _build_message(
-    event: InterviewEvent, candidate_email: str, panelist_emails: list[str], round_type: str
-) -> EmailMessage:
-    start = event.start_time.strftime("%A %d %B %Y, %H:%M UTC")
-    link = event.meeting_link or "(a meeting link will follow separately)"
-    body = (
-        "Your interview is confirmed.\n\n"
-        f"Round: {round_type.title()}\n"
-        f"When:  {start}\n"
-        f"Join:  {link}\n\n"
-        "This time is also on the interviewers' calendars.\n"
+
+def _when(event: InterviewEvent) -> str:
+    return event.start_time.strftime("%A %d %B %Y, %H:%M UTC")
+
+
+async def _dispatch(
+    db: AsyncSession,
+    *,
+    interview_event_id,
+    notification_type: str,
+    msg: EmailMessage,
+    client: SendGridClient,
+) -> str:
+    if not client.configured:
+        status = "SIMULATED"
+        logger.info(
+            "notification.simulated event_id=%s type=%s to=%s subject=%r body=%r",
+            interview_event_id, notification_type, msg.to, msg.subject, msg.text_body,
+        )
+    else:
+        try:
+            await client.send(msg)
+            status = "SENT"
+            logger.info(
+                "notification.sent event_id=%s type=%s to=%s",
+                interview_event_id, notification_type, msg.to,
+            )
+        except Exception as exc:  # noqa: BLE001 - a send failure must not affect the caller
+            status = "FAILED"
+            logger.warning(
+                "notification.failed event_id=%s type=%s to=%s: %s",
+                interview_event_id, notification_type, msg.to, type(exc).__name__,
+            )
+
+    await repository.insert(
+        db,
+        interview_event_id=interview_event_id,
+        channel="EMAIL",
+        notification_type=notification_type,
+        recipient=msg.to,
+        status=status,
     )
-    return EmailMessage(
-        to=candidate_email,
-        cc=list(panelist_emails),
-        subject=f"Interview confirmed — {round_type.title()} round",
-        text_body=body,
-    )
+    await db.commit()
+    return status
 
 
 async def send_booking_confirmation(
@@ -46,34 +79,59 @@ async def send_booking_confirmation(
     round_type: str,
     client: SendGridClient,
 ) -> str:
-    """Return the recorded status. Guaranteed to write exactly one row + commit."""
-    msg = _build_message(event, candidate_email, panelist_emails, round_type)
-
-    if not client.configured:
-        status = "SIMULATED"
-        logger.info(
-            "notification.simulated event_id=%s to=%s subject=%r body=%r",
-            event.id, msg.to, msg.subject, msg.text_body,
-        )
-    else:
-        try:
-            await client.send(msg)
-            status = "SENT"
-            logger.info("notification.sent event_id=%s to=%s", event.id, msg.to)
-        except Exception as exc:  # noqa: BLE001 - a send failure must not break booking
-            status = "FAILED"
-            logger.warning(
-                "notification.failed event_id=%s to=%s: %s",
-                event.id, msg.to, type(exc).__name__,
-            )
-
-    await repository.insert(
+    """Exactly one CONFIRMATION row per successful booking."""
+    link = event.meeting_link or "(a meeting link will follow separately)"
+    body = (
+        "Your interview is confirmed.\n\n"
+        f"Round: {round_type.title()}\n"
+        f"When:  {_when(event)}\n"
+        f"Join:  {link}\n\n"
+        "This time is also on the interviewers' calendars.\n"
+    )
+    msg = EmailMessage(
+        to=candidate_email,
+        cc=list(panelist_emails),
+        subject=f"Interview confirmed — {round_type.title()} round",
+        text_body=body,
+    )
+    return await _dispatch(
         db,
         interview_event_id=event.id,
-        channel="EMAIL",
         notification_type="CONFIRMATION",
-        recipient=msg.to,
-        status=status,
+        msg=msg,
+        client=client,
     )
-    await db.commit()
-    return status
+
+
+async def send_lifecycle_notification(
+    db: AsyncSession,
+    event: InterviewEvent,
+    *,
+    notification_type: str,
+    candidate_email: str,
+    panelist_emails: list[str],
+    reason: str | None,
+    client: SendGridClient,
+) -> str:
+    """One DECLINE / RESCHEDULE / CANCELLATION / REMINDER row against `event`."""
+    subject, phrase = _LIFECYCLE_COPY[notification_type]
+    body = (
+        f"Regarding the interview on {_when(event)}: {phrase}.\n"
+    )
+    if reason:
+        body += f"\nReason given: {reason}\n"
+    if notification_type != "CANCELLATION":
+        body += "\nWe will follow up with a new time shortly.\n"
+    msg = EmailMessage(
+        to=candidate_email,
+        cc=list(panelist_emails),
+        subject=subject,
+        text_body=body,
+    )
+    return await _dispatch(
+        db,
+        interview_event_id=event.id,
+        notification_type=notification_type,
+        msg=msg,
+        client=client,
+    )

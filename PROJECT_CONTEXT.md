@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 7 (Booking & Conflict Prevention — **the MVP Acceptance Gate**) complete and committed (`82764be`); gate met locally. Phase 8 (Booking Confirmation) implemented, verified, awaiting commit approval.
+**Last updated:** 2026-09-06 — Backend Phase 8 (Booking Confirmation) complete and committed (`290af4f`). Phase 9 (POST-MVP: decline / reschedule / cancel / audit / reminders / self-service) implemented, verified, awaiting commit approval. Analytics (item 6) deferred.
 
 ---
 
@@ -246,7 +246,7 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     unchanged. No token in any schema, log, audit row, or reconciliation metadata (asserted).
   - **Committed `82764be`.**
 
-- **2026-09-06 — Backend Phase 8: Booking Confirmation (FR-030).** *Awaiting commit approval.*
+- **2026-09-06 — Backend Phase 8: Booking Confirmation (FR-030).** Commit `290af4f`.
   - `backend/app/notifications/` — confirmation email only. `client.py` (single SendGrid HTTP seam,
     one `httpx` POST, no vendor SDK; `configured` = has an API key), `service.py`
     (`send_booking_confirmation` — **never raises**: `SIMULATED` when no API key [logs the full
@@ -261,11 +261,49 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     (`notification_logs`). `config.py`: `sendgrid_api_key` (empty ⇒ SIMULATED), `email_from_address`.
   - **No new public endpoint.** Reminders / decline / cancel / SMS / WhatsApp explicitly out of scope.
   - **Verified:** `alembic` up/down/up clean (head `0006`); `ruff` clean; `pytest` **141 passed +
-    1 skipped** (`test_notifications` 8: SIMULATED / SENT / FAILED paths, exactly-one-row,
-    failed-booking-writes-nothing, dispatch-exception-doesn't-break-booking, SendGrid payload +
-    error-status units). `docker compose build backend` → `/health` ok, **15 routes unchanged**.
-    Frozen engine unchanged. `SENDGRID_API_KEY` never appears in a log line (FAILED logs only the
-    exception type).
+    1 skipped**. `docker compose build backend` → `/health` ok, **15 routes unchanged**.
+
+- **2026-09-06 — Backend Phase 9: POST-MVP (decline / reschedule / cancel / audit / reminders /
+  self-service).** *Awaiting commit approval.* **No new tables, migrations, dependencies, or
+  invented endpoints.** Frozen Phase 5 engine untouched.
+  - `app/interviews/lifecycle.py` + 4 routes on the existing `interviews_router`:
+    - `POST /interviews/{id}/decline` [PANELIST participant] — `response_status → DECLINED`; if
+      `BOOKED`: cancel the Google event + `interview_events → CANCELLED` + `DECLINE` notice +
+      `→ RESCHEDULING` (response), then best-effort `→ READY_FOR_SCHEDULING` + re-run
+      `scheduling.service.generate` (→ `RECOMMENDED`); pre-booking: `→ READY_FOR_SCHEDULING`.
+    - `POST /interviews/{id}/reschedule` [ADMIN | owning CANDIDATE] — requires `BOOKED` else
+      `409 NOT_BOOKED`; same booked-branch teardown + `RESCHEDULE` notice + re-recommendation.
+    - `POST /interviews/{id}/cancel` [ADMIN] — non-terminal only else `409 REQUEST_ALREADY_TERMINAL`;
+      cancel active event + `CANCELLATION` notice (only if an event existed) + `→ CANCELLED`.
+    - `GET /interviews/{id}/audit` [ADMIN] — paginated `audit_logs` for `entity_id = {id}`, newest
+      first.
+  - Each mutating op: `redis_lock` → cancel the Google event **outside any DB txn** (best-effort:
+    Google delete failure still cancels locally + writes a `reconciliation_tasks` row
+    `CANCEL_DELETE_FAILED`) → one Postgres txn (statuses + participant + audit) → commit → release
+    → best-effort notification + re-recommendation. Re-recommendation and notification failures
+    are logged and never propagate.
+  - **Self-service (item 4):** `POST /interviews/{id}/recommendations` and `.../book` authz widened
+    from `require_role("ADMIN")` to `admin_or_owning_candidate()` (`app/core/deps.py`) — a
+    CANDIDATE may act only on their own request.
+  - `app/notifications/service.py` generalised: `_dispatch` (SIMULATED/SENT/FAILED + one row +
+    commit) + `send_booking_confirmation` + `send_lifecycle_notification` (DECLINE / RESCHEDULE /
+    CANCELLATION / REMINDER — all `notification_type` values already in the CHECK from `0006`).
+  - `scripts/send_reminders.py` — `process_due_reminders(db, *, hours)` cron one-shot: one
+    `REMINDER` `notification_logs` row per CONFIRMED event starting within the window that has none
+    yet; idempotent; **no in-app scheduler**.
+  - `app/booking/service._organiser_connection` → public `organiser_connection` (reused to cancel
+    the event); `booking.repository.create_reconciliation_task` gained `commit=False` (lifecycle
+    calls it mid-transaction). `errors.py`: `NotBookedError` (409), `RequestAlreadyTerminalError`
+    (409). `interviews/repository.list_audit`.
+  - **`migrations/env.py`** already carried the `disable_existing_loggers=False` fix (Phase 7).
+  - **Deferred:** item 6 **analytics** — API_DESIGN defines no analytics endpoint and the phase
+    forbids inventing one; a bare stats script was judged low-value. Not built.
+  - **Verified:** `ruff` clean; `alembic` still head `0006` (no migration); `pytest` **166 passed +
+    1 skipped** (+25 Phase 9: `test_lifecycle` 15, `test_audit_view` 4, `test_self_service` 3,
+    `test_reminders` 3); **all 4 Phase 7 gate tests still green** (two supporting authz tests
+    updated for the widened self-service rule). `docker compose build backend` → `/health` ok,
+    **19 routes**. Frozen engine `git diff` empty. No token in any schema, log, audit row, or
+    reconciliation metadata (asserted).
 
 ### Current backend structure
 
@@ -280,53 +318,54 @@ backend/
 │   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy + event create/delete (client seam)
 │   ├── scheduling/        # PURE engine (types/engine/scoring/explain) + layer (service/repository/router/schemas)
 │   ├── booking/           # POST /interviews/{id}/book — the 8-step compensating-action sequence
-│   ├── notifications/     # booking-confirmation email (SendGrid seam; no endpoint)
+│   ├── notifications/     # confirmation + lifecycle emails (SendGrid seam; no endpoint)
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
 │       ├── models.py      # User, CalendarConnection, InterviewRequest, InterviewParticipant,
-│       │                  #   CandidateAvailability, AvailabilityWindow, AuditLog,
-│       │                  #   RecommendationRun, RecommendedSlot, InterviewEvent, ReconciliationTask
+│       │                  #   CandidateAvailability, AvailabilityWindow, AuditLog, RecommendationRun,
+│       │                  #   RecommendedSlot, InterviewEvent, ReconciliationTask, NotificationLog
 │       ├── security.py    # bcrypt + JWT (+ calendar_state token)
 │       ├── crypto.py      # Fernet encrypt/decrypt for OAuth tokens at rest
 │       ├── locks.py       # redis_lock async CM (SET NX EX, token-guarded release)
-│       ├── deps.py        # get_current_user, require_role()
+│       ├── deps.py        # get_current_user, require_role(), admin_or_owning_candidate()
 │       ├── errors.py      # typed errors + global handler
 │       ├── pagination.py  # Page[T] + page_params
 │       ├── audit.py       # record_audit()
 │       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
+│   interviews/ also holds lifecycle.py (decline/reschedule/cancel/audit, Phase 9)
 ├── migrations/            # Alembic (env.py + versions/0001..0006)
-├── scripts/  (seed.py, engine_demo.py)
+├── scripts/  (seed.py, engine_demo.py, send_reminders.py)
 ├── tests/  (…, test_calendar, test_recommendations, test_booking, test_notifications,
+│            test_lifecycle, test_audit_view, test_self_service, test_reminders,
 │            test_calendar_sandbox [skipif])
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-All MVP module folders now exist. Post-MVP (Phase 9) reuses the existing schema —
-no new module folders expected until then.
+All MVP + Post-MVP module folders now exist. No new module folders expected before Phase 12.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 8 — Booking Confirmation** — implemented and verified locally,
-  awaiting commit approval. `app/notifications/` (SendGrid seam + service + repo), migration
-  `0006` (`notification_logs`), dispatch wired into `booking/service.book()` after the commit,
-  `config.py` gains `sendgrid_api_key` / `email_from_address`. No new endpoint.
-- **Phase 8 decisions taken (see §7):** N-1 one `notification_logs` row per booking (not per
-  recipient), `recipient` = candidate email; N-2 no `sendgrid` SDK — one `httpx` POST behind the
-  usual client seam; N-3 empty `SENDGRID_API_KEY` ⇒ `SIMULATED` (default in dev/CI), a real key ⇒
-  attempt `SENT`, any failure ⇒ `FAILED`; N-4 the dispatch never raises out of `book()` — a
-  confirmation failure cannot roll back or fail the booking.
-- **MVP Acceptance Gate status:** Phase 7's 4 mandatory tests pass locally and are committed
-  (`82764be`). Phase 8's degradation path (SIMULATED) is complete, so the confirmation step of the
-  Core Demo Loop is satisfied without blocking the gate (requirements.md §5). **Remaining before
-  the gate is fully signed off: a green CI run + a real end-to-end demo against a live Google
-  account** (and, optionally, a real SendGrid key for a live `SENT`).
-- **Next:** Phase 9 — **POST-MVP** (decline / cancel / reschedule / reminders / audit view).
-  **Must not start until Phase 7's gate is confirmed in full** — this is the one hard rule in
-  `IMPLEMENTATION.md`.
+- **In progress:** **Phase 9 — POST-MVP** — implemented and verified locally, awaiting commit
+  approval. `app/interviews/lifecycle.py` (+ 4 routes), `admin_or_owning_candidate()` dep,
+  generalised notifications, `scripts/send_reminders.py`. No new tables / migrations / deps /
+  invented endpoints. **Analytics (item 6) deferred** — no API_DESIGN endpoint exists and the
+  phase forbids inventing one.
+- **Phase 9 decisions taken (see §7):** D-1 lifecycle lives in `app/interviews/`; D-2 scope =
+  items 1–5 (reminders as a cron script); D-3 `send_reminders.py`, 24h default window; D-4
+  analytics deferred; D-5 the decline/reschedule response is the value at the transition point
+  (`RESCHEDULING`), re-recommendation is a best-effort follow-through; D-6 Google delete failure
+  on cancel/decline → local `CANCELLED` still commits + `reconciliation_tasks` row; D-7
+  `/recommendations` + `/book` widened to `admin_or_owning_candidate()`; D-8 `409
+  REQUEST_ALREADY_TERMINAL` for cancelling a terminal request.
+- **MVP Acceptance Gate:** Phase 7's 4 mandatory tests pass and are committed (`82764be`); still
+  green after Phases 8–9. **Remaining for full sign-off: a green CI run + a real end-to-end demo
+  against a live Google account** (+ optionally a real SendGrid key for a live `SENT`).
+- **Next:** Phase 10 (frontend — teammate) / Phase 11 (resilience & security hardening) /
+  Phase 12 (docs + bonus). Backend Post-MVP items done except analytics.
 
 ---
 
@@ -334,6 +373,28 @@ no new module folders expected until then.
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 9)** — POST-MVP lifecycle. **D-1:** `decline` / `reschedule` / `cancel` /
+  `audit` live in `app/interviews/lifecycle.py` on the existing `interviews_router` (the module
+  that owns `interview_requests`). **D-2:** this session implements priority items 1–5; **item 6
+  (analytics) is deferred** — API_DESIGN has no analytics endpoint and Phase 9 forbids inventing
+  one, and a bare numbers script was judged low-value. **D-3:** reminders = `scripts/
+  send_reminders.py` (`process_due_reminders(db, *, hours)`), cron-run, 24 h default window, one
+  `REMINDER` row per CONFIRMED in-window event with none yet, idempotent; **no in-app scheduler**.
+  **D-5:** the `decline`/`reschedule` response carries the status **at the transition point**
+  (`RESCHEDULING` for a was-BOOKED request, else `READY_FOR_SCHEDULING`); the `→
+  READY_FOR_SCHEDULING` + re-run of `scheduling.service.generate` is a best-effort follow-through
+  the client observes via `GET /interviews/{id}` — a re-recommendation failure leaves the request
+  in `READY_FOR_SCHEDULING`/`FAILED` and the decline still returns `200`. **D-6:** a Google
+  event-delete failure during `cancel`/`decline`/`reschedule` still commits the local
+  `interview_events.status = CANCELLED` (user intent is authoritative) and records a
+  `reconciliation_tasks` row `reason='CANCEL_DELETE_FAILED'`; the endpoint returns `200`. **D-7:**
+  `POST /interviews/{id}/recommendations` and `.../book` authz widened from `require_role("ADMIN")`
+  to `admin_or_owning_candidate()` (`app/core/deps.py`) — a CANDIDATE may act only on their own
+  request (IMPLEMENTATION.md Phase 9 item 4). Two supporting Phase 6/7 authz tests were updated
+  accordingly (the 4 mandatory gate tests are unaffected). **D-8:** cancelling a `CANCELLED` /
+  `COMPLETED` request → `409 REQUEST_ALREADY_TERMINAL` (API_DESIGN names no code). No panelist
+  "accept" endpoint (API_DESIGN defines only `/decline`); `interview_participants.response_status
+  = 'ACCEPTED'` stays unused. `BOOKED → COMPLETED` remains manual/future (G5).
 - **2026-09-06 (Phase 8)** — Booking confirmation. **N-1:** **one** `notification_logs` row per
   booking (the acceptance criterion says "exactly one"), `recipient` = the candidate's email; the
   panelists already receive the Google Calendar invite (Phase 7 sends with `sendUpdates=all`). The
@@ -493,12 +554,15 @@ silently** — each item is resolved with Harshit before the phase it affects.
   Phase 9 ∥ Phase 10 overlap). Cosmetic; add a footnote when convenient.
 - **G5:** Nothing transitions `BOOKED → COMPLETED` (no endpoint/phase/job). Confirmed still true
   after Phase 7 — booking lands the request in `BOOKED`; `COMPLETED` remains manual/future.
-- **`reconciliation_tasks` (Phase 7):** rows are created on a failed compensating delete; there is
-  **no** resolution endpoint or job yet (an operator queries `WHERE status='OPEN'`). Out of scope
-  for the MVP gate.
-- **G6 — HANDLED (Phase 4).** MVP allows one submission; the `AWAITING_CANDIDATE_AVAILABILITY`
-  state gate enforces it. `repository.get_latest()` already sorts by `submitted_at` desc, so the
-  Post-MVP re-submission flow (Phase 9) is a state-machine change only.
+- **`reconciliation_tasks` (Phase 7/9):** rows are created on a failed compensating delete
+  (`COMPENSATING_DELETE_FAILED`) and on a failed cancel/decline event delete
+  (`CANCEL_DELETE_FAILED`); there is still **no** resolution endpoint or job (an operator queries
+  `WHERE status='OPEN'`).
+- **G6 — HANDLED (Phase 4/9).** MVP allows one candidate submission (the
+  `AWAITING_CANDIDATE_AVAILABILITY` gate). Phase 9's decline/reschedule re-runs the Scheduling
+  Service against the **existing** `candidate_availability` — no re-submission flow was needed.
+- **Analytics (Phase 9 item 6) — DEFERRED.** No API_DESIGN endpoint; Phase 9 forbids inventing
+  one. Revisit in Phase 12 (bonus) if time remains, likely as `scripts/analytics.py`.
 - **G7 — RESOLVED 2026-09-06.** `GET /calendar/status` implemented as part of Phase 6.
 - **G8 — HANDLED (Phase 4).** `AVAILABILITY_HORIZON_DAYS = 21` in `app/availability/schemas.py`;
   the Phase 5 Scheduling Proximity `horizon_days` (~14) will be a separate, separately-named
