@@ -59,7 +59,8 @@ export default function HomePage() {
             </div>
           </Link>
 
-          <div className="flex items-center gap-3">
+     
+         <div className="flex items-center gap-3">
             {isAuthenticated ? (
               <Button
                 variant="primary"

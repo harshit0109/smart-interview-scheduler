@@ -7,7 +7,7 @@ import { Role } from "@/lib/types";
 import { Loader2 } from "lucide-react";
 
 interface RoleGuardProps {
-  allowedRole: Role;
+  allowedRole: Role | Role[];
   children: React.ReactNode;
 }
 
@@ -19,18 +19,24 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
   const router = useRouter();
   const pathname = usePathname();
 
+  const allowedRoles = Array.isArray(allowedRole)
+    ? allowedRole
+    : [allowedRole];
+
   React.useEffect(() => {
     if (isLoading) return;
 
-    // 1. Unauthenticated users -> redirect to /login
+    // Not logged in
     if (!isAuthenticated || !user) {
-      const redirectUrl = `/login?redirect=${encodeURIComponent(pathname)}`;
+      const redirectUrl =
+        `/login?redirect=${encodeURIComponent(pathname)}`;
+
       router.replace(redirectUrl);
       return;
     }
 
-    // 2. Role mismatch -> redirect to their role's respective workspace
-    if (role !== allowedRole) {
+    // Check whether current user's role is allowed
+    if (!role || !allowedRoles.includes(role)) {
       if (role === "ADMIN") {
         router.replace("/admin");
       } else if (role === "PANELIST") {
@@ -41,14 +47,28 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
         router.replace("/login");
       }
     }
-  }, [isAuthenticated, user, role, allowedRole, isLoading, router, pathname]);
+  }, [
+    isAuthenticated,
+    user,
+    role,
+    allowedRole,
+    isLoading,
+    router,
+    pathname,
+  ]);
 
-  // While verifying authentication state or if unauthorized, render clean enterprise skeleton
-  if (isLoading || !isAuthenticated || role !== allowedRole) {
+  // Show loading / unauthorized state
+  if (
+    isLoading ||
+    !isAuthenticated ||
+    !role ||
+    !allowedRoles.includes(role)
+  ) {
     return (
       <div className="min-h-screen w-full flex flex-col items-center justify-center bg-slate-50 text-slate-500">
         <div className="flex flex-col items-center space-y-3">
           <Loader2 className="w-8 h-8 text-workday-blue animate-spin" />
+
           <p className="text-xs font-medium tracking-wide">
             Verifying enterprise permissions...
           </p>

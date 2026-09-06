@@ -38,7 +38,7 @@ export const Sidebar: React.FC<{ onCloseMobile?: () => void }> = ({
           { label: "Overview", href: "/admin", icon: LayoutDashboard },
           { label: "All Interviews", href: "/admin/interviews", icon: Users },
           { label: "Create Interview", href: "/admin/interviews/new", icon: PlusCircle },
-          { label: "Google Calendar", href: "/panelist/calendar", icon: Calendar },
+          { label: "Google Calendar", href: "/calendar", icon: Calendar },
           { label: "Settings", href: "/admin/settings", icon: Settings },
         ];
       case "PANELIST":
@@ -51,8 +51,8 @@ export const Sidebar: React.FC<{ onCloseMobile?: () => void }> = ({
       case "CANDIDATE":
         return [
           { label: "Overview", href: "/candidate", icon: LayoutDashboard },
-          { label: "My Interviews", href: "/candidate", icon: UserCheck },
-          { label: "Profile", href: "/admin/settings", icon: Settings },
+          { label: "My Interviews", href: "/candidate/interviews", icon: UserCheck },
+          { label: "Profile", href: "/candidate/profile", icon: Settings },
         ];
       default:
         return [{ label: "Overview", href: "/", icon: LayoutDashboard }];

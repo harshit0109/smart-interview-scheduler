@@ -13,18 +13,22 @@
   }
 
   /* Custom enterprise scrollbars */
+
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
+
   ::-webkit-scrollbar-track {
-    background: #F1F5F9;
+    background: #F5F7F8;
   }
+
   ::-webkit-scrollbar-thumb {
-    background: #CBD5E1;
+    background: #B8C4CE;
     border-radius: 3px;
   }
+
   ::-webkit-scrollbar-thumb:hover {
-    background: #94A3B8;
+    background: #0875E1;
   }
 }
