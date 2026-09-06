@@ -4,7 +4,41 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phases 1–11 (partial, rate limiting) complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**. **New real-world onboarding/invitation architecture started:** Phase A (invitation schema, migration `0007`), Phase B (`POST /users` ADMIN provisioning + `POST /auth/bootstrap-admin` first-ADMIN web setup + `/setup` frontend route), Phase C (admin RBAC fix + misleading-copy/UI cleanup), and Phase C3/C4 (admin interview-creation wizard rebuild, `interview_requests.title` wired into the API) are committed locally on `main`, **not yet pushed**. Current migration head: `0007` (no new migration in C3/C4 — `title` already existed as a column, just wasn't exposed by the API). Invitation token issuance/dispatch is **not yet built** — the next phase.
+**Last updated:** 2026-09-07 — Autonomous session. Corrected stale state below, then: (a) surfaced the Phase-9 lifecycle endpoints in the frontend, (b) added a `company` field end-to-end. See **§0 — Autonomous session 2026-09-07** immediately below for the audit and scope decisions.
+
+**Corrected state (the old header was badly out of date):** everything through the invitation phase **is committed AND pushed** to `origin/main`. `main` HEAD before this session = `7e59c26` (`origin/main` = `e444954`; `7e59c26` was the one unpushed commit — token-gated admin self-registration + role-aware auth entry UX, made earlier the same day). Migration head: `0007`. Backend Phases 1–11, frontend Phase 10, Phases A/B/C/C3/C4, and the full invitation phase (backend module + `/invite/[token]` + admin trigger + the UNAVAILABLE/resend fixes) are all live on `origin/main`.
+
+---
+
+## 0. Autonomous session 2026-09-07 — audit + scope
+
+Ran unattended against the overnight "make it a coherent end-to-end product" brief. **Key finding: the backend is ~90% of that brief already.** Rather than re-implement, this session inspected every subsystem and built only the genuine gaps that are safe to do unattended.
+
+### What already exists (do NOT rebuild)
+
+| Overnight ask | Already implemented |
+|---|---|
+| Google Calendar + Meet | `app/calendar/` — separate OAuth flow, connect/callback/status, free/busy, `create_event`/`delete_event` with `conferenceData` → real Meet link (Phase 6/7). Honest `424` failure codes. Frontend `/calendar`, `/calendar/connected`, `/calendar/error`, unconfigured-OAuth detection. |
+| Email — invitation / confirmation / reminder | `app/notifications/` SendGrid seam, `SENT`/`SIMULATED`/`FAILED` honest; `send_booking_confirmation` (Phase 8), `send_lifecycle_notification` DECLINE/RESCHEDULE/CANCELLATION/REMINDER (Phase 9); `scripts/send_reminders.py` idempotent cron one-shot (no in-app scheduler). |
+| Admin enters panelist email → notify + visibility | `POST /users` provisioning + `app/invitations/` issuance (token = SHA-256 only) + admin "Invitations" card showing real `status` + `delivery_status`. |
+| Timezones / DST | All `TIMESTAMPTZ`/UTC, `valid_iana_timezone`, offset-aware ISO8601 required, `test_edge_cases.py` DST tests, frontend `zonedWallTimeToISO`. |
+| Invitation + response workflow | `app/invitations/` — candidate ACCEPT/DECLINE (UNAVAILABLE blocked), panelist ACCEPT/DECLINE/UNAVAILABLE, resend = token rotation, lazy expiry. |
+| Scheduling engine + explanations | Frozen pure engine (Phase 5), `explain.py` deterministic top-factor + trade-off string, `score_breakdown` persisted, frontend `ScoreBreakdown`/`RecommendationCard`. |
+| Decline/cancel cascade | `app/interviews/lifecycle.py` — decline re-runs recommendations, cancel tears down the Google event, `reconciliation_tasks` on Google-delete failure. |
+| Security | RBAC (`require_role`, `admin_or_owning_candidate`), Redis rate limiting (Phase 11), Fernet token-at-rest, `audit_logs`, no-secret-leak tests. |
+
+### Gaps this session closed
+
+- **Lifecycle UI** — the Phase-9 endpoints (`POST /interviews/{id}/decline|reschedule|cancel`, `GET .../audit`) had **zero** frontend surface (P10-7). Added `interviewsApi.decline/reschedule/cancel/getAudit` + role-appropriate buttons on the interview-detail pages. Frontend-only, no backend change.
+- **`company` field** — `interview_requests.title` (the Job/Role) existed; there was no company. Added `company` (nullable `VARCHAR(200)`) — migration `0008`, model + `CreateInterviewRequest`/`InterviewRequestOut` + repo/service pass-through (exact mirror of `title`), wizard + review + detail display. Additive; no existing contract changed.
+
+### Deliberately NOT built unattended (need Harshit's design input)
+
+- **Zoom / meeting-platform selector** — `requirements.md:429` lists real Zoom as a **frozen non-goal** ("marketplace review cannot complete in hackathon time; Meet covers the same bonus point"). Meet is already automatic on every booking. Adding a platform enum only matters once a second real platform exists. Not started — would contradict locked scope.
+- **Interviewer no-show workflow** — nothing in `requirements.md` / `DB_DESIGN.md` / `API_DESIGN.md` mentions attendance, a grace window, or `INTERVIEWER_NO_SHOW`. It is a net-new state-machine extension + a decision about who marks it (no real-time Meet presence API is wired). Needs a design decision.
+- **Next-round / outcome / "remove candidate"** — likewise zero spec precedent. Needs a data-model decision: a new `interview_outcomes` table? a `parent_request_id` self-FK for rounds? candidate archive vs. delete? `G5` (nothing moves `BOOKED → COMPLETED`) is the current known edge of the state machine.
+
+Recommended next design conversation: the outcome/rounds model (unlocks no-show + advancement together), then whether Zoom is worth reopening.
 
 ---
 
