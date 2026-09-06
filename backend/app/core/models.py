@@ -182,6 +182,61 @@ class InterviewParticipant(Base):
     request: Mapped["InterviewRequest"] = relationship(back_populates="participants")
 
 
+class CandidateAvailability(Base):
+    """One candidate submission event for a request (DB_DESIGN.md).
+
+    MVP: exactly one row per request (the state gate enforces it); the schema
+    allows more for the Post-MVP re-submission flow.
+    """
+
+    __tablename__ = "candidate_availability"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
+    # Captured per submission — NOT read from users.timezone (requirements.md §13).
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False)
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    windows: Mapped[list["AvailabilityWindow"]] = relationship(
+        back_populates="availability",
+        cascade="all, delete-orphan",
+        order_by="AvailabilityWindow.start_time",
+    )
+
+
+class AvailabilityWindow(Base):
+    __tablename__ = "availability_windows"
+    __table_args__ = (
+        CheckConstraint("end_time > start_time", name="ck_availability_windows_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    candidate_availability_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("candidate_availability.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    availability: Mapped["CandidateAvailability"] = relationship(back_populates="windows")
+
+
 class AuditLog(Base):
     """Append-only record of key state-changing actions (FR-037).
 

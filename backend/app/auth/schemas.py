@@ -1,9 +1,10 @@
 """Pydantic request/response models — source of truth for auth input validation."""
 
 import uuid
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.validators import valid_iana_timezone
 
 
 class RegisterRequest(BaseModel):
@@ -21,12 +22,8 @@ class RegisterRequest(BaseModel):
 
     @field_validator("timezone")
     @classmethod
-    def _valid_iana_timezone(cls, v: str) -> str:
-        try:
-            ZoneInfo(v)
-        except (ZoneInfoNotFoundError, ValueError):
-            raise ValueError("not a valid IANA time zone") from None
-        return v
+    def _valid_timezone(cls, v: str) -> str:
+        return valid_iana_timezone(v)
 
 
 class LoginRequest(BaseModel):

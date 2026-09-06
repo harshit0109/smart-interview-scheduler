@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.auth.router import router as auth_router
+from app.availability.router import router as availability_router
 from app.core.db import engine
 from app.core.errors import register_exception_handlers
 from app.core.redis import redis_client
@@ -34,6 +35,7 @@ register_exception_handlers(app)
 app.include_router(auth_router, prefix=API_V1)
 app.include_router(users_router, prefix=API_V1)
 app.include_router(interviews_router, prefix=API_V1)
+app.include_router(availability_router, prefix=API_V1)
 
 
 async def _check_database() -> str:

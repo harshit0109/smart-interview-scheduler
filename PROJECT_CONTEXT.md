@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 2 (Database & Authentication, login only) complete and committed (`44599f9`). Docker stack now verified locally. Phase 3 (Interview Request Management) in progress.
+**Last updated:** 2026-09-06 — Backend Phase 3 (Interview Request Management) complete and committed (`b6256a4`). Phase 4 (Candidate Availability) implemented, verified, awaiting commit approval.
 
 ---
 
@@ -124,6 +124,37 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     passed (auth flow, RBAC 403/401, "Google login writes no `calendar_connections`", bcrypt/JWT
     units). `docker compose up --build` → backend healthy, `/health` 200.
 
+- **2026-09-06 — Backend Phase 3: Interview Request Management.** Commit `b6256a4`.
+  - `backend/app/interviews/` (`schemas`/`repository`/`service`/`router`): `POST /interviews`
+    (ADMIN — validates candidate is a CANDIDATE + each panelist a PANELIST, unknown id → 404,
+    wrong role → 422 `INVALID_PARTICIPANT`), `GET /interviews` (role-filtered + paginated),
+    `GET /interviews/{id}` (ADMIN or participant; non-participant → 404), `PATCH /interviews/{id}`
+    (ADMIN, state-gated → 409 `REQUEST_LOCKED_FOR_EDITING`).
+  - `backend/app/core/`: `pagination.py` (`Page[T]` + `page_params`), `audit.py` (`record_audit()`),
+    `models.py` gained `InterviewRequest` / `InterviewParticipant` / `AuditLog`, `errors.py` gained
+    `NotFoundError` / `InvalidParticipantError` / `RequestLockedForEditingError`.
+  - Migration `0002` (`interview_requests`, `interview_participants`, `audit_logs`). `status` is
+    `VARCHAR(40)` (DB_DESIGN's 30 can't hold `AWAITING_CANDIDATE_AVAILABILITY`).
+  - `pyproject.toml` packaging: `packages.find` include `app*` so subpackages ship in a
+    non-editable / Docker build (the old `packages = ["app"]` dropped them).
+  - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 38 passed; `docker compose
+    build backend` → `/health` ok, routes present.
+
+- **2026-09-06 — Backend Phase 4: Candidate Availability.** *Awaiting commit approval.*
+  - `backend/app/availability/` (`schemas`/`repository`/`service`/`router`):
+    `POST /interviews/{id}/candidate-availability` (CANDIDATE, own request only → else 403;
+    request must be `AWAITING_CANDIDATE_AVAILABILITY` → else 409 `REQUEST_NOT_AWAITING_AVAILABILITY`;
+    1–10 windows, each offset-aware ISO8601 stored UTC, `end > start`, future, within a 21-day
+    horizon; validation errors are `422` with `field_errors` keyed by window index; success
+    transitions the request `→ READY_FOR_SCHEDULING` and writes `audit_logs`),
+    `GET /interviews/{id}/availability` (ADMIN or owning CANDIDATE; anyone else → 404).
+  - `backend/app/core/validators.py` — shared `valid_iana_timezone`, now used by both `auth` and
+    `availability` schemas. `errors.py` gained `RequestNotAwaitingAvailabilityError` (409).
+    `models.py` gained `CandidateAvailability` / `AvailabilityWindow`.
+  - Migration `0003` (`candidate_availability`, `availability_windows`).
+  - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 55 passed;
+    `docker compose build backend` → `/health` ok, both new routes present.
+
 ### Current backend structure
 
 ```
@@ -132,35 +163,44 @@ backend/
 │   ├── main.py            # FastAPI app + GET /health + /api/v1 routers
 │   ├── auth/              # register / login / google / refresh
 │   ├── users/             # GET /users/me
+│   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
+│   ├── availability/      # POST/GET candidate availability (nested under /interviews/{id})
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
-│       ├── models.py      # User, CalendarConnection
+│       ├── models.py      # User, CalendarConnection, InterviewRequest,
+│       │                  #   InterviewParticipant, CandidateAvailability,
+│       │                  #   AvailabilityWindow, AuditLog
 │       ├── security.py    # bcrypt + JWT
 │       ├── deps.py        # get_current_user, require_role()
 │       ├── errors.py      # typed errors + global handler
+│       ├── pagination.py  # Page[T] + page_params
+│       ├── audit.py       # record_audit()
+│       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
-├── migrations/            # Alembic (env.py + versions/0001)
+├── migrations/            # Alembic (env.py + versions/0001..0003)
 ├── scripts/seed.py
-├── tests/  (test_health, test_security, test_auth, test_rbac)
+├── tests/  (test_health, test_security, test_auth, test_rbac, test_interviews, test_availability)
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-Remaining module folders (`interviews/`, `scheduling/`, `booking/`, …) arrive with their phase,
+Remaining module folders (`scheduling/`, `booking/`, …) arrive with their phase,
 per `CODING_GUIDELINES.md` §Modular design.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 3 — Interview Request Management** (`IMPLEMENTATION.md` Phase 3):
-  `interview_requests` + `interview_participants` tables (+ `audit_logs`, see D3), the new
-  `app/interviews/` module, and `POST /interviews` / `GET /interviews` / `GET /interviews/{id}` /
-  `PATCH /interviews/{id}` with per-role visibility. No availability / scoring / booking.
-- **Phase 3 decisions taken (see §7):** D1 — create requests directly in
-  `AWAITING_CANDIDATE_AVAILABILITY`; D2 — request-level `buffer_minutes` only, per-panelist
-  overrides deferred Post-MVP; D3 — `audit_logs` table + minimal `record_audit()` helper now.
-- **After Phase 3:** Phase 4 — Candidate Availability.
+- **In progress:** **Phase 4 — Candidate Availability** — implemented and verified locally,
+  awaiting commit approval. `app/availability/` module, migration `0003`, the two
+  `/interviews/{id}/(candidate-availability|availability)` endpoints, the
+  `AWAITING_CANDIDATE_AVAILABILITY → READY_FOR_SCHEDULING` transition. No scoring / scheduling.
+- **Phase 4 decisions taken (see §7):** offset-aware ISO8601 windows only (naive rejected),
+  stored UTC; submitted `timezone` is per-submission metadata; `AVAILABILITY_HORIZON_DAYS = 21`
+  (named separately from the Phase 5 scoring proximity horizon — G8); wrong-candidate → 403,
+  unauthorised reader → 404.
+- **Next:** Phase 5 — Scheduling Engine (pure business logic). **Do not start until Phase 4 is
+  committed.** G1 (Workload Balance input naming) must be resolved before Phase 5.
 
 **MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
 interview scheduling loop from request creation to real Calendar booking."* — **not yet passed.**
@@ -172,6 +212,15 @@ No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 4)** — Candidate availability windows must be **offset-aware ISO8601**
+  (naive datetimes → `422`); they are normalised to UTC before persistence (requirements.md §13
+  DST safety). The submission's `timezone` field is stored verbatim as per-submission metadata
+  (DB_DESIGN.md — not read from `users.timezone`) for Phase 5 scoring. `AVAILABILITY_HORIZON_DAYS
+  = 21` lives in `app/availability/schemas.py`, deliberately distinct from the Scheduling
+  Proximity `horizon_days` (~14) of Phase 5 (G8). One submission per request in the MVP — the
+  `AWAITING_CANDIDATE_AVAILABILITY` state gate enforces it; the schema allows more rows for the
+  Post-MVP re-submission flow (G6). Wrong-candidate submit → `403`; a non-ADMIN/non-owner reading
+  `GET .../availability` → `404` (per `API_DESIGN.md`).
 - **2026-09-06 (Phase 3, D1 — resolves C2)** — `POST /interviews` creates a request **directly in
   `AWAITING_CANDIDATE_AVAILABILITY`**, not `DRAFT`. Deviation from `API_DESIGN.md` (which says
   `status: DRAFT`): the Core Demo Loop and API surface have no separate "send to candidate" step,
@@ -246,13 +295,14 @@ silently** — each item is resolved with Harshit before the phase it affects.
 - **C3:** `IMPLEMENTATION.md` phase-duration percentages sum to ~115% (likely intentional
   Phase 9 ∥ Phase 10 overlap). Cosmetic; add a footnote when convenient.
 - **G5:** Nothing transitions `BOOKED → COMPLETED` (no endpoint/phase/job). Treat as manual/future.
-- **G6:** `candidate_availability` schema implies multiple submissions per request; the API allows
-  one (state moves off `AWAITING_CANDIDATE_AVAILABILITY`). Fine for MVP; when Phase 9 re-opens it,
-  sort by `submitted_at` for "latest wins".
+- **G6 — HANDLED (Phase 4).** MVP allows one submission; the `AWAITING_CANDIDATE_AVAILABILITY`
+  state gate enforces it. `repository.get_latest()` already sorts by `submitted_at` desc, so the
+  Post-MVP re-submission flow (Phase 9) is a state-machine change only.
 - **G7:** `GET /calendar/status` is not listed under any `IMPLEMENTATION.md` phase — fold into
   Phase 6.
-- **G8:** Two distinct "horizon" values — candidate-availability submission horizon (~21 days) vs
-  Scheduling Proximity scoring decay `horizon_days` (~14). Keep as two separately named constants.
+- **G8 — HANDLED (Phase 4).** `AVAILABILITY_HORIZON_DAYS = 21` in `app/availability/schemas.py`;
+  the Phase 5 Scheduling Proximity `horizon_days` (~14) will be a separate, separately-named
+  constant in the engine module.
 
 ### Environment gotchas
 
@@ -260,10 +310,12 @@ silently** — each item is resolved with Harshit before the phase it affects.
   (branch `master`, 0 commits). The real project is the inner `…/smart-interview-scheduler/`
   (branch `main`, remote `harshit0109/smart-interview-scheduler`). **Always work from the inner
   folder.** Consider removing the outer `.git`.
-- **Docker is not installed on the dev machine.** Phase 1's `docker-compose.yml` / `Dockerfile`
-  are written to spec but `docker compose up` is **unverified locally** — first real exercise is
-  GitHub Actions CI (service containers) or any Docker host. Backend itself is verified via a local
-  venv (`ruff`, `pytest`, `uvicorn`).
+- **Docker now works on the dev machine** (verified Phase 1 onward). `docker compose up --build`
+  brings up db + redis + backend; the backend container runs `alembic upgrade head` on start.
+- **Host port 5432 is contended:** a native `postgresql-x64-18` Windows service listens on 5432
+  alongside the Docker forward, so host→container auth to `localhost:5432` can hit the native PG
+  and fail. Tests need that native service **stopped** (or its `sis` role password aligned).
+  CI is unaffected (isolated service containers).
 - **Python launcher:** `python` is the broken Windows Store shim; use `py` (Python 3.13 present).
 - **Phase 1 deviation from the literal phase text:** the Next.js placeholder / `frontend` service
   was **not** created (frontend is the teammate's). The `frontend` block in `docker-compose.yml` is

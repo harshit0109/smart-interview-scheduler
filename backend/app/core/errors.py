@@ -86,6 +86,12 @@ class RequestLockedForEditingError(AppError):
     message = "This interview request can no longer be edited in its current state."
 
 
+class RequestNotAwaitingAvailabilityError(AppError):
+    status_code = 409
+    code = "REQUEST_NOT_AWAITING_AVAILABILITY"
+    message = "This interview request is not awaiting candidate availability."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {
