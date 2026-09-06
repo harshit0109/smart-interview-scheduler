@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 3 (Interview Request Management) complete and committed (`b6256a4`). Phase 4 (Candidate Availability) implemented, verified, awaiting commit approval.
+**Last updated:** 2026-09-06 — Backend Phase 4 (Candidate Availability) complete and committed (`54508b3`). Phase 5 (Scheduling Engine — pure) implemented, verified, awaiting commit approval.
 
 ---
 
@@ -140,7 +140,7 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
   - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 38 passed; `docker compose
     build backend` → `/health` ok, routes present.
 
-- **2026-09-06 — Backend Phase 4: Candidate Availability.** *Awaiting commit approval.*
+- **2026-09-06 — Backend Phase 4: Candidate Availability.** Commit `54508b3`.
   - `backend/app/availability/` (`schemas`/`repository`/`service`/`router`):
     `POST /interviews/{id}/candidate-availability` (CANDIDATE, own request only → else 403;
     request must be `AWAITING_CANDIDATE_AVAILABILITY` → else 409 `REQUEST_NOT_AWAITING_AVAILABILITY`;
@@ -155,6 +155,32 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
   - **Verified:** `alembic` up/down/up clean; `ruff` clean; `pytest` 55 passed;
     `docker compose build backend` → `/health` ok, both new routes present.
 
+- **2026-09-06 — Backend Phase 5: Scheduling Engine (pure business logic).**
+  *Awaiting commit approval.*
+  - `backend/app/scheduling/` — **pure, zero I/O** (stdlib only; `test_engine_purity.py` enforces
+    no `sqlalchemy`/`redis`/`httpx`/`fastapi`/Google/`app.*`-outside-`scheduling` imports, no
+    `datetime.now()`, no `random`):
+    - `types.py` — `EngineInput` / `EngineResult` / `ScoredSlot` / `ScoreBreakdown` /
+      `Participant` / `CandidateWindow` / `SchedulingConstraints` / `ScoringWeights` (§8 defaults)
+      / `WorkingHours` / `TimeInterval`, and `SchedulingEngineError(Exception)`.
+    - `engine.py` — `generate_recommendations(EngineInput) -> EngineResult`, the full 10-step
+      pipeline (normalize → validate → merge → per-participant free intervals → sweep-line
+      intersection → duration+2×buffer / working-hours constraints → slide slots at 15-min steps →
+      score → rank desc, tie-break earlier `start_time` → top-N, default 3).
+    - `scoring.py` — the five §8 factors as independent pure functions (timezone fairness = **min**
+      across participants; working-hours comfort = **min**; scheduling proximity `1 − days/horizon`,
+      `PROXIMITY_HORIZON_DAYS = 14`; workload balance `1/(1+count)` **averaged** over panelists,
+      bucketed by each panelist's local day; buffer quality `(min(gap)−buffer)/buffer` clamped) +
+      `weighted_total`.
+    - `explain.py` — deterministic explanation string naming the top 1–2 factors by weighted
+      contribution + one honest trade-off; returns `relevant_reasoning_factors`.
+  - `backend/scripts/engine_demo.py` — `python -m scripts.engine_demo`, fixed synthetic 3-participant
+    input + fixed `reference_time`, prints ranked/scored/explained slots.
+  - **No** migration, **no** endpoint, **no** dependency, **no** `main.py` change.
+  - **Verified:** `ruff` clean; `pytest` 94 passed (39 new: `test_engine`, `test_scoring`,
+    `test_engine_purity`); demo prints 3 ranked slots deterministically; `docker compose build
+    backend` → `/health` ok, route list unchanged (10).
+
 ### Current backend structure
 
 ```
@@ -165,6 +191,7 @@ backend/
 │   ├── users/             # GET /users/me
 │   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
 │   ├── availability/      # POST/GET candidate availability (nested under /interviews/{id})
+│   ├── scheduling/        # PURE engine: types / engine / scoring / explain (no I/O; Phase 6 adds router/service/repo)
 │   └── core/
 │       ├── config.py      # Settings (pydantic-settings)
 │       ├── db.py          # async engine + session dependency
@@ -179,28 +206,32 @@ backend/
 │       ├── validators.py  # valid_iana_timezone
 │       └── redis.py       # async Redis client
 ├── migrations/            # Alembic (env.py + versions/0001..0003)
-├── scripts/seed.py
-├── tests/  (test_health, test_security, test_auth, test_rbac, test_interviews, test_availability)
+├── scripts/  (seed.py, engine_demo.py)
+├── tests/  (test_health, test_security, test_auth, test_rbac, test_interviews,
+│            test_availability, test_engine, test_scoring, test_engine_purity)
 ├── pyproject.toml  ·  alembic.ini  ·  Dockerfile  ·  .dockerignore  ·  .env.example
 ```
 
-Remaining module folders (`scheduling/`, `booking/`, …) arrive with their phase,
-per `CODING_GUIDELINES.md` §Modular design.
+Remaining module folders (`booking/`, `notifications/`, …) arrive with their phase,
+per `CODING_GUIDELINES.md` §Modular design. `scheduling/` currently holds only the
+pure engine; its `router.py`/`service.py`/`repository.py` arrive in Phase 6.
 
 ---
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 4 — Candidate Availability** — implemented and verified locally,
-  awaiting commit approval. `app/availability/` module, migration `0003`, the two
-  `/interviews/{id}/(candidate-availability|availability)` endpoints, the
-  `AWAITING_CANDIDATE_AVAILABILITY → READY_FOR_SCHEDULING` transition. No scoring / scheduling.
-- **Phase 4 decisions taken (see §7):** offset-aware ISO8601 windows only (naive rejected),
-  stored UTC; submitted `timezone` is per-submission metadata; `AVAILABILITY_HORIZON_DAYS = 21`
-  (named separately from the Phase 5 scoring proximity horizon — G8); wrong-candidate → 403,
-  unauthorised reader → 404.
-- **Next:** Phase 5 — Scheduling Engine (pure business logic). **Do not start until Phase 4 is
-  committed.** G1 (Workload Balance input naming) must be resolved before Phase 5.
+- **In progress:** **Phase 5 — Scheduling Engine (pure)** — implemented and verified locally,
+  awaiting commit approval. `app/scheduling/{types,engine,scoring,explain}.py` + `scripts/
+  engine_demo.py` + 3 test files. No migration, no endpoint, no dependency.
+- **Phase 5 decisions taken (see §7):** `types.py` allowed as a 4th engine file (D-A);
+  `existing_bookings: dict[participant_id, list[datetime]]`, bucketed by panelist-local day
+  (D-B / resolves G1); the five §8 scoring formulas exactly as planned (D-C); explicit
+  `EngineInput.reference_time` — engine never calls `datetime.now()` (D-D); plain
+  `SchedulingEngineError(Exception)` in the package, no fastapi / `app.core` HTTP errors (D-E);
+  demo at `backend/scripts/engine_demo.py` (D-F). Buffer required on **both** sides of a slot
+  (`duration + 2×buffer`), per §8's "both sides" wording.
+- **Next:** Phase 6 — Google Calendar Integration & Scheduling Service. **Do not start until
+  Phase 5 is committed and frozen.** Resolve **G3** and **G7** before/at Phase 6.
 
 **MVP Acceptance Gate** (end of Phase 7): *"We can successfully demonstrate the complete core
 interview scheduling loop from request creation to real Calendar booking."* — **not yet passed.**
@@ -212,6 +243,23 @@ No Post-MVP / Bonus work starts until it passes in full (incl. all 4 concurrency
 
 Decisions made during the build that are **not** already in the frozen specs.
 
+- **2026-09-06 (Phase 5)** — Scheduling Engine layout & contracts. **D-A:** the engine package is
+  `types.py` + `engine.py` + `scoring.py` + `explain.py` (the IMPLEMENTATION.md "and nothing else"
+  is read as "no Service/Router/Repo/migration", not "no data-definition module"). **D-B (resolves
+  G1):** `EngineInput.existing_bookings: dict[participant_id, list[datetime]]` (tz-aware UTC),
+  bucketed by **each panelist's local calendar day** for Workload Balance; Phase 6 fills it from
+  `interview_events` (empty until Phase 7). **D-C:** the five §8 factors implemented with the
+  concrete formulas from the Phase 5 plan — timezone fairness & working-hours comfort aggregate by
+  **min** across participants, workload balance by **mean** across panelists; `buffer_quality =
+  clamp((min(gap_before, gap_after) − buffer_minutes) / buffer_minutes)` so exactly-minimum → 0.0
+  and ≥2× → 1.0, matching §8's worded examples. **D-D:** `EngineInput.reference_time` is an
+  explicit tz-aware UTC input; the engine never reads the wall clock or uses randomness (enforced
+  by `test_engine_purity.py`). **D-E:** `SchedulingEngineError(Exception)` lives in
+  `app/scheduling/types.py`; the engine imports nothing from fastapi or `app.core`. Slot validity
+  requires the full `duration + 2×buffer` inside one common-free interval (buffer on **both**
+  sides — §8). `PROXIMITY_HORIZON_DAYS = 14` in the engine, separate from Phase 4's
+  `AVAILABILITY_HORIZON_DAYS = 21` (G8). `algorithm_version = "1.0.0"` (feeds
+  `recommendation_runs.algorithm_version` in Phase 6).
 - **2026-09-06 (Phase 4)** — Candidate availability windows must be **offset-aware ISO8601**
   (naive datetimes → `422`); they are normalised to UTC before persistence (requirements.md §13
   DST safety). The submission's `timezone` field is stored verbatim as per-submission metadata
@@ -282,9 +330,9 @@ silently** — each item is resolved with Harshit before the phase it affects.
   `AWAITING_CANDIDATE_AVAILABILITY`; no "send to candidate" transition. See §7.
 - **G2 (Phase 3 schema / Phase 5) — RESOLVED 2026-09-06 (D2).** No override columns; MVP uses
   request-level `buffer_minutes` + a global working-hours constant. Overrides are Post-MVP. See §7.
-- **G1 (Phase 5):** Workload Balance (§8) needs per-panelist same-day booked-interview counts, but
-  §7b's Engine input list omits them. The Service must gather this from `interview_events` and
-  pass it into the Engine as normalized input; name it explicitly.
+- **G1 (Phase 5) — RESOLVED 2026-09-06 (D-B).** `EngineInput.existing_bookings:
+  dict[participant_id, list[datetime]]`, bucketed by panelist-local day. Phase 6's Service
+  populates it from `interview_events` (empty until the table exists in Phase 7). See §7.
 - **G3 (Phase 6 / frontend integration):** `requirements.md` §4 grants CANDIDATE read-only viewing
   of `score_breakdown`, but `POST /recommendations` is ADMIN-only and `GET /interviews/{id}` only
   promises a "summary". Decide whether `GET /interviews/{id}` returns full `recommended_slots` for
