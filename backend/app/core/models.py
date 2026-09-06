@@ -195,7 +195,10 @@ class ParticipantInvitation(Base):
     """A tokenised invitation for one participant of one interview request.
 
     The raw token is NEVER stored — only its SHA-256 hex digest (`token_hash`).
-    Resend rotates the token (new hash) in place, invalidating the old link.
+    Resend rotates the token (new hash) in place, invalidating the old link —
+    but only while `status` is still PENDING or EXPIRED; a row that already
+    ACCEPTED/DECLINED/UNAVAILABLE is left untouched by a resend (see
+    `app/invitations/service.py::issue_for_request`).
     Delivery state lives here, not in `notification_logs` (which is tied to
     booked `interview_events`).
     """

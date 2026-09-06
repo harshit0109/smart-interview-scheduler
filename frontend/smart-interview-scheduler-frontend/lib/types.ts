@@ -84,6 +84,8 @@ export interface CandidateAvailability {
   submitted_at: string;
 }
 
+export type ParticipantResponseStatus = "PENDING" | "ACCEPTED" | "DECLINED" | "UNAVAILABLE";
+
 export interface InterviewParticipant {
   id: string;
   user_id: string;
@@ -92,6 +94,7 @@ export interface InterviewParticipant {
   role: Role;
   timezone?: string;
   calendar_status?: CalendarStatus;
+  response_status?: ParticipantResponseStatus;
 }
 
 export interface InterviewEvent {
@@ -111,6 +114,7 @@ export interface InterviewRequest {
   candidate_name: string;
   candidate_email: string;
   candidate_timezone: string;
+  candidate_response_status?: ParticipantResponseStatus;
   title?: string | null;
   round_type: RoundType;
   duration_minutes: number;

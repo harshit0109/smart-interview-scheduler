@@ -30,6 +30,7 @@ from app.core.config import settings
 from app.core.errors import (
     AccountAlreadyClaimedError,
     AccountSetupNotRequiredError,
+    InvalidParticipantError,
     InvitationAlreadyRespondedError,
     InvitationExpiredError,
     InvitationNotFoundError,
@@ -78,12 +79,19 @@ async def _send_invite_email(
         return "FAILED"
 
 
+_TERMINAL_RESPONSE_STATUSES = {"ACCEPTED", "DECLINED", "UNAVAILABLE"}
+
+
 async def issue_for_request(
     db: AsyncSession, actor: User, request_id: uuid.UUID, *, client: SendGridClient
 ) -> list[schemas.InvitationSummary]:
     """ADMIN-controlled, explicit — never called from interview creation.
     One invitation per current participant (candidate + every panelist); a
-    participant who already has a row gets it rotated in place (resend)."""
+    participant with no invitation yet, or one still PENDING/EXPIRED, gets a
+    fresh token (issue or resend). A participant who already ACCEPTED /
+    DECLINED / UNAVAILABLE is left untouched — resending must never erase a
+    real response by resetting it back to PENDING. Reopening a completed
+    response is a deliberate future admin action, not implicit in "resend"."""
     request = await interviews_repository.get(db, request_id)
     if request is None:
         raise NotFoundError("interview request not found")
@@ -93,9 +101,12 @@ async def issue_for_request(
     out: list[schemas.InvitationSummary] = []
 
     for participant, user in parts:
+        existing = await repository.get_for_request_user(db, request_id, user.id)
+        if existing is not None and existing.status in _TERMINAL_RESPONSE_STATUSES:
+            continue  # already responded — resend must not reopen or reset this
+
         raw_token = secrets.token_urlsafe(32)
         token_hash = _hash(raw_token)
-        existing = await repository.get_for_request_user(db, request_id, user.id)
         is_resend = existing is not None
         row = repository.apply(
             existing,
@@ -230,6 +241,8 @@ async def respond(
         raise InvitationExpiredError()
     if row.status != "PENDING":
         raise InvitationAlreadyRespondedError()
+    if response == "UNAVAILABLE" and row.role != "PANELIST":
+        raise InvalidParticipantError("only a panelist invitation can be marked UNAVAILABLE")
 
     row.status = response
     row.responded_at = datetime.now(UTC)

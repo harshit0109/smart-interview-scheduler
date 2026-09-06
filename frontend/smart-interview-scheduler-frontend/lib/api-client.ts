@@ -222,7 +222,7 @@ async function request<T>(
 interface BackendParticipant {
   user_id: string;
   role_in_interview: "CANDIDATE" | "PANELIST";
-  response_status: "PENDING" | "ACCEPTED" | "DECLINED";
+  response_status: "PENDING" | "ACCEPTED" | "DECLINED" | "UNAVAILABLE";
 }
 
 interface BackendInterviewEvent {
@@ -342,7 +342,11 @@ function adaptInterview(
       role: "PANELIST",
       timezone: dir[p.user_id]?.timezone,
       calendar_status: undefined,
+      response_status: p.response_status,
     }));
+  const candidateParticipant = raw.participants.find(
+    (p) => p.role_in_interview === "CANDIDATE"
+  );
 
   return {
     id: raw.id,
@@ -350,6 +354,7 @@ function adaptInterview(
     candidate_name: resolveName(raw.candidate_id, dir, "Candidate"),
     candidate_email: resolveEmail(raw.candidate_id, dir),
     candidate_timezone: resolveTimezone(raw.candidate_id, dir),
+    candidate_response_status: candidateParticipant?.response_status,
     title: raw.title ?? null,
     round_type: raw.round_type,
     duration_minutes: raw.duration_minutes,

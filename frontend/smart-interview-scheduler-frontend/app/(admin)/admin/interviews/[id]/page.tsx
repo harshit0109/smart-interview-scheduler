@@ -4,7 +4,12 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { interviewsApi, invitationsApi, ApiClientError } from "@/lib/api-client";
-import { InterviewRequest, InvitationRecord, InvitationSummary } from "@/lib/types";
+import {
+  InterviewRequest,
+  InvitationRecord,
+  InvitationSummary,
+  ParticipantResponseStatus,
+} from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InterviewTimeline } from "@/components/shared/InterviewTimeline";
@@ -296,7 +301,8 @@ export default function AdminInterviewDetailPage() {
           <div>
             <CardTitle className="text-sm">Invitations</CardTitle>
             <CardDescription className="text-xs">
-              Send or resend an interview invitation to the candidate and every panelist.
+              Send or resend an interview invitation. Anyone who already responded keeps
+              their response — resending only reaches people still pending or expired.
             </CardDescription>
           </div>
           <Button
@@ -334,6 +340,15 @@ export default function AdminInterviewDetailPage() {
                     ? { name: interview.candidate_name, email: interview.candidate_email }
                     : interview.panelists.find((p) => p.user_id === inv.user_id) ||
                       interview.panelists.find((p) => p.id === inv.user_id);
+                // Authoritative — interview_participants.response_status. Unlike
+                // the invitation row, resending never resets this, so it's the
+                // one source of truth for "did this person actually respond."
+                const responseStatus: ParticipantResponseStatus =
+                  (inv.user_id === interview.candidate_id
+                    ? interview.candidate_response_status
+                    : interview.panelists.find((p) => p.user_id === inv.user_id)
+                        ?.response_status) || "PENDING";
+                const linkExpired = inv.status === "EXPIRED" && responseStatus === "PENDING";
                 const fresh = justIssued[inv.user_id];
                 return (
                   <div key={inv.id} className="py-3 space-y-2">
@@ -345,13 +360,14 @@ export default function AdminInterviewDetailPage() {
                         </p>
                         <p className="text-slate-500">{person?.email}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <InvitationStatusBadge status={inv.status} />
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                        <ResponseStatusBadge status={responseStatus} />
+                        {linkExpired && <Badge variant="outline">Link Expired</Badge>}
                         <DeliveryStatusBadge status={inv.delivery_status} />
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-400">
-                      Sent {inv.send_count}x • Expires {formatDateOnly(inv.expires_at)}
+                      Sent {inv.send_count}x • Link expires {formatDateOnly(inv.expires_at)}
                     </p>
                     {fresh && (
                       <div className="flex items-center gap-2 pt-1">
@@ -374,7 +390,7 @@ export default function AdminInterviewDetailPage() {
   );
 }
 
-function InvitationStatusBadge({ status }: { status: string }) {
+function ResponseStatusBadge({ status }: { status: ParticipantResponseStatus }) {
   const variant =
     status === "ACCEPTED"
       ? "success"
@@ -382,8 +398,6 @@ function InvitationStatusBadge({ status }: { status: string }) {
       ? "danger"
       : status === "UNAVAILABLE"
       ? "warning"
-      : status === "EXPIRED"
-      ? "outline"
       : "info";
   return <Badge variant={variant}>{status}</Badge>;
 }

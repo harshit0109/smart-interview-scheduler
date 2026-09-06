@@ -104,6 +104,66 @@ def test_resend_rotates_token_and_increments_send_count(client, make_user, db_va
     assert stale.status_code == 404
 
 
+def test_resend_all_preserves_an_already_responded_invitation(client, make_user, db_val):
+    """Resend must never silently reopen a completed response by resetting it
+    back to PENDING — only PENDING/EXPIRED invitations get a fresh token."""
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+    rid = _create_request(client, admin, candidate, [panelist])
+
+    first = {r["user_id"]: r for r in _issue(client, admin, rid).json()}
+    candidate_token = _token_from(first[str(candidate.id)]["invite_url"])
+    accept = client.post(
+        f"{V1}/invitations/{candidate_token}/respond", json={"response": "ACCEPTED"}
+    )
+    assert accept.status_code == 200
+
+    second = _issue(client, admin, rid).json()
+    # candidate excluded from the resend — already responded
+    assert {r["user_id"] for r in second} == {str(panelist.id)}
+
+    still_accepted = client.get(f"{V1}/invitations/{candidate_token}")
+    assert still_accepted.status_code == 200
+    assert still_accepted.json()["status"] == "ACCEPTED"
+
+    responded_at = db_val(
+        "SELECT responded_at FROM participant_invitations WHERE interview_request_id = :r "
+        "AND user_id = :u",
+        {"r": rid, "u": str(candidate.id)},
+    )
+    assert responded_at is not None  # the original response record is intact
+
+    part_status = db_val(
+        "SELECT response_status FROM interview_participants WHERE interview_request_id = :r "
+        "AND user_id = :u",
+        {"r": rid, "u": str(candidate.id)},
+    )
+    assert part_status == "ACCEPTED"
+
+
+def test_resend_still_reissues_pending_and_expired(client, make_user, db_exec):
+    """The exclusion is specific to a completed response — PENDING and EXPIRED
+    invitations still get resent (that's the whole point of "resend")."""
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    p1, p2 = make_user("PANELIST"), make_user("PANELIST")
+    rid = _create_request(client, admin, candidate, [p1, p2])
+
+    first = {r["user_id"]: r for r in _issue(client, admin, rid).json()}
+    db_exec(
+        "UPDATE participant_invitations SET expires_at = now() - interval '1 hour' "
+        "WHERE id = :i",
+        {"i": first[str(p1.id)]["id"]},
+    )
+
+    second = _issue(client, admin, rid).json()
+    resent_ids = {r["user_id"] for r in second}
+    assert resent_ids == {str(candidate.id), str(p1.id), str(p2.id)}
+    p1_row = next(r for r in second if r["user_id"] == str(p1.id))
+    assert p1_row["status"] == "PENDING"  # the expired link is revived, not left dead
+
+
 def test_candidate_and_panelists_both_included(client, make_user):
     admin = make_user("ADMIN")
     candidate = make_user("CANDIDATE")
@@ -225,6 +285,25 @@ def test_respond_declined_and_unavailable(client, make_user):
     )
     assert unavail.status_code == 200
     assert unavail.json()["status"] == "UNAVAILABLE"
+
+
+def test_candidate_unavailable_is_rejected(client, make_user):
+    """UNAVAILABLE is a panelist-only response (the candidate's counterpart is
+    DECLINE); a candidate invitation must not accept it."""
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+    rid = _create_request(client, admin, candidate, [panelist])
+    row = next(r for r in _issue(client, admin, rid).json() if r["user_id"] == str(candidate.id))
+    token = _token_from(row["invite_url"])
+
+    resp = client.post(f"{V1}/invitations/{token}/respond", json={"response": "UNAVAILABLE"})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "INVALID_PARTICIPANT"
+
+    # The rejected attempt must not have consumed the PENDING invitation.
+    still_pending = client.get(f"{V1}/invitations/{token}")
+    assert still_pending.json()["status"] == "PENDING"
 
 
 def test_respond_twice_is_rejected(client, make_user):
