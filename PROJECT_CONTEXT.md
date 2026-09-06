@@ -359,12 +359,41 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     commented stub points at the wrong context path; needs a multi-stage Dockerfile +
     `output: "standalone"` + build-time `BACKEND_ORIGIN`. `docker-compose.yml` left untouched.
 
+- **2026-09-06 — Phase 11 (partial): Resilience & Security Hardening — rate limiting.**
+  *Awaiting push approval.* Frozen Phase 5 engine untouched (`git diff` empty); no existing
+  endpoint contract changed; no new dependency.
+  - **`app/core/ratelimit.py`** — Redis-backed fixed-window rate limiter as a **pure ASGI
+    middleware** (`app.add_middleware(RateLimitMiddleware)` in `main.py`). Reuses the shared
+    `redis_client`. One atomic Lua script (`INCR` + first-hit `EXPIRE`) → multi-instance safe.
+    Tiers per API_DESIGN.md §Rate Limiting (60s window, key
+    `ratelimit:{user:<id>|ip:<addr>}:{bucket}`): **STRICT 10/min** (public auth routes +
+    candidate-facing endpoints), **STANDARD 60/min** (all other authenticated), plus additive
+    **REC 5/min** (`POST /recommendations`) and **BOOK 10/min**
+    (`/book`,`/reschedule`,`/decline`,`/cancel`). Identity = access-token `sub` when present,
+    else client IP (first `X-Forwarded-For` hop when `rate_limit_trust_forwarded_for`). Redis
+    failure **fails open** (logs a warning, allows the request). Exempt: `OPTIONS`,
+    `GET /health`, non-`/api/`. `429` → standard error envelope (`RATE_LIMITED`) + `Retry-After`
+    + `X-RateLimit-Limit/Remaining/Reset`; allowed responses carry the `X-RateLimit-*` headers.
+  - **`app/core/config.py`** — `rate_limit_*` settings (`enabled` default True; disabled by an
+    autouse test fixture so the existing suite is unaffected). **`app/core/errors.py`** —
+    `RateLimitedError` + `error_body()` helper.
+  - **Tests:** `tests/test_rate_limit.py` (18) + `tests/test_edge_cases.py` (4 — DST/UTC storage,
+    engine DST-boundary stability, no-orphaned-rows on double booking, 22-participant engine load
+    smoke). Full suite **193 passed + 1 skipped** (was 171+1). Live smoke against a running
+    uvicorn confirmed: `/health` never limited; `/auth/login` 429s at the 11th; 429 body +
+    `Retry-After`/`X-RateLimit-*` correct; `X-Forwarded-For` identity separation works.
+  - **CI:** new `frontend` job (`npm ci` → lint → `tsc --noEmit` → build); backend `Migrate`
+    step now also runs `alembic downgrade base && alembic upgrade head`.
+  - **Remaining Phase 11:** written §13 edge-case checklist doc, git-history secret scan,
+    security-checklist sign-off, structured/JSON request logging (recommended deferral).
+
 ### Current backend structure
 
 ```
 backend/
 ├── app/
 │   ├── main.py            # FastAPI app + GET /health + /api/v1 routers
+│   ├── main.py also wires app/core/ratelimit.py (RateLimitMiddleware, Phase 11)
 │   ├── auth/              # register / login / google / refresh
 │   ├── users/             # GET /users/me  +  GET /users?role= (ADMIN directory, Phase 10)
 │   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
@@ -403,11 +432,13 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 10 — frontend/backend integration** — implemented and verified
-  locally, awaiting commit approval. Backend: `GET /users?role=` (ADMIN directory) + tests, no
-  other backend change. Frontend: real-auth wiring, same-origin proxy, central response-adapter
-  layer, OAuth landing pages, availability-timezone fix. **Deferred:** Google Identity login,
-  Post-MVP lifecycle UI, `docker-compose` frontend container. See §5 + §7.
+- **In progress:** **Phase 11 — resilience & security hardening** — rate limiting done
+  (3 local commits, awaiting push approval): `app/core/ratelimit.py` pure-ASGI middleware +
+  `rate_limit_*` config + 18 rate-limit tests + 4 edge-case/load tests + CI (frontend job +
+  Alembic down/up). Full suite 193 pass + 1 skip; live smoke confirmed. **Remaining Phase 11:**
+  §13 edge-case checklist doc, git-history secret scan, security-checklist sign-off. See §5 + §7.
+- **Phase 10 — frontend/backend integration:** complete, committed (`cbbb7ff`), pushed;
+  `IMPLEMENTATION.md` PHASE 10 marked COMPLETED (`6508788`).
 - **Backend Phases 1–9:** complete, committed, and pushed to `main`. Analytics (Phase 9 item 6)
   deferred — no API_DESIGN endpoint and the phase forbids inventing one.
 - **Phase 9 decisions taken (see §7):** D-1 lifecycle lives in `app/interviews/`; D-2 scope =
@@ -420,7 +451,8 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
 - **MVP Acceptance Gate:** Phase 7's 4 mandatory tests pass and are committed (`82764be`); still
   green after Phases 8–9. **Remaining for full sign-off: a green CI run + a real end-to-end demo
   against a live Google account** (+ optionally a real SendGrid key for a live `SENT`).
-- **Next:** Phase 11 (resilience & security hardening) / Phase 12 (docs + bonus). Also open:
+- **Next:** finish Phase 11 (edge-case checklist doc, secret scan, checklist sign-off) /
+  Phase 12 (docs + bonus). Also open:
   Google Identity login end-to-end, `docker-compose` frontend service, real end-to-end demo
   against a live Google account, green CI run.
 
@@ -429,6 +461,27 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
 ## 7. Technical decisions log (append-only, newest first)
 
 Decisions made during the build that are **not** already in the frozen specs.
+
+- **2026-09-06 (Phase 11)** — Rate limiting. **P11-1:** implemented as **pure ASGI middleware**,
+  not `starlette.BaseHTTPMiddleware` — the latter buffers the response body and reschedules the
+  endpoint, which intermittently corrupted the sync `TestClient` portal against the async DB
+  (whole-suite `RuntimeError` cascade; caught in Phase 11 verification). The pure-ASGI layer only
+  reads request headers and rewrites `http.response.start` headers. **P11-2:** **fixed-window**
+  counter (one atomic `INCR`+`EXPIRE` Lua script), not a true token bucket — it is exactly the
+  `ratelimit:{id}:{endpoint}` + 60s-TTL pattern DB_DESIGN.md describes and is multi-instance
+  safe; the ~2× boundary burst is acceptable for abuse control. **P11-3:** the spec's STRICT tier
+  is keyed by **user id when the caller is authenticated**, by IP otherwise — the frozen wording
+  ("10 req/min/IP") assumes unauthenticated callers, and IP-keying authenticated candidate
+  traffic would collapse every user behind the Next.js proxy into one bucket. STRICT 10/min and
+  STANDARD 60/min are unchanged. **P11-4:** two additive expensive tiers not in the frozen
+  numbers — **REC 5/min** (`POST /recommendations`, amplifies to N Google Free/Busy calls) and
+  **BOOK 10/min** (`/book`,`/reschedule`,`/decline`,`/cancel`; Google event ops + lock + txn) —
+  justified by §11 "resource exhaustion". **P11-5:** Redis failure **fails open** for rate
+  limiting (matches `core/locks.py` / `calendar/service.py` and DB_DESIGN "degrades performance,
+  never correctness"). **P11-6:** rate limiting is installed on the app always; an autouse test
+  fixture flips `settings.rate_limit_enabled` off for the existing suite, and `test_rate_limit.py`
+  opts back in — production behavior is not weakened. **P11-7:** CI gains a `frontend` job and an
+  `alembic downgrade base && upgrade head` round-trip; not treated as a spec change.
 
 - **2026-09-06 (Phase 10)** — Frontend/backend integration. **P10-1:** the frontend↔backend seam
   uses a **Next.js same-origin rewrite proxy** (`/api/:path*` → `${BACKEND_ORIGIN}/api/:path*`),
