@@ -8,7 +8,7 @@ Smart Interview Scheduler. See `requirements.md` for the full specification and
 | Path        | Owner              | Contents                              |
 | ----------- | ------------------ | ------------------------------------- |
 | `backend/`  | Backend (Harshit)  | FastAPI service                      |
-| `frontend/` | Frontend (teammate) | Next.js app (added separately)       |
+| `frontend/` | Frontend (Harshitha) | Next.js app (added separately)       |
 | `*.md`      | shared             | Frozen specs + living context         |
 
 ## Local development
