@@ -63,8 +63,10 @@ export interface RecommendedSlot {
 
 export interface RecommendationRun {
   recommendation_run_id: string;
-  interview_id: string;
-  created_at: string;
+  // Backend RecommendationResponse returns only { recommendation_run_id, slots }.
+  // These are kept optional for the demo fixtures / future use.
+  interview_id?: string;
+  created_at?: string;
   slots: RecommendedSlot[];
 }
 

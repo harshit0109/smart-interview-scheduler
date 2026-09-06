@@ -4,7 +4,6 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { Role } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +33,6 @@ export default function RegisterPage() {
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [confirmPassword, setConfirmPassword] = React.useState("");
-  const [role, setRole] = React.useState<Role>("ADMIN");
   const [timezone, setTimezone] = React.useState("UTC");
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
@@ -62,16 +60,9 @@ export default function RegisterPage() {
     }
 
     try {
-      await register({
-        name,
-        email,
-        password,
-        role,
-        timezone,
-      });
-      if (role === "ADMIN") router.push("/admin");
-      else if (role === "PANELIST") router.push("/panelist");
-      else router.push("/candidate");
+      await register({ name, email, password, timezone });
+      // Self-registration always creates a CANDIDATE account (backend decision C1).
+      router.push("/candidate");
     } catch (err: any) {
       setErrorMsg(err.message || "Registration failed. Please verify your details.");
     }
@@ -137,55 +128,16 @@ export default function RegisterPage() {
               />
             </div>
 
-            {/* Role Selection with Explanations (Section 10) */}
-            <div>
-              <Label required>Account Role</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-1">
-                <button
-                  type="button"
-                  onClick={() => setRole("ADMIN")}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    role === "ADMIN"
-                      ? "border-workday-blue bg-workday-accent/50 text-workday-blue font-semibold"
-                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
-                  }`}
-                >
-                  <p className="text-xs font-bold">Admin</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                    Recruiter / Hiring Manager creating requests
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRole("PANELIST")}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    role === "PANELIST"
-                      ? "border-workday-blue bg-workday-accent/50 text-workday-blue font-semibold"
-                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
-                  }`}
-                >
-                  <p className="text-xs font-bold">Panelist</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                    Interviewer connecting Google Calendar
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRole("CANDIDATE")}
-                  className={`p-3 rounded-lg border text-left transition-colors ${
-                    role === "CANDIDATE"
-                      ? "border-workday-blue bg-workday-accent/50 text-workday-blue font-semibold"
-                      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700"
-                  }`}
-                >
-                  <p className="text-xs font-bold">Candidate</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-tight">
-                    Applicant submitting availability
-                  </p>
-                </button>
-              </div>
+            {/* Self-registration creates a CANDIDATE account. ADMIN and PANELIST
+                accounts are provisioned by an administrator, not self-served. */}
+            <div className="rounded-lg border border-sky-200 bg-sky-50/70 p-3 text-xs text-slate-700 flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-workday-blue shrink-0 mt-0.5" />
+              <span>
+                This creates a <span className="font-semibold">Candidate</span>{" "}
+                account for submitting interview availability. Recruiter (Admin)
+                and Interviewer (Panelist) accounts are set up by your
+                administrator.
+              </span>
             </div>
 
             {/* Timezone Selector with IANA Names (Section 10) */}

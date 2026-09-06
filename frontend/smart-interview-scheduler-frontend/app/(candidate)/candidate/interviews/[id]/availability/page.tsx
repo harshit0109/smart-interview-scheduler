@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { getSystemTimezone, getShortTz } from "@/lib/utils";
+import { getSystemTimezone, getShortTz, zonedWallTimeToISO } from "@/lib/utils";
 import {
   Calendar,
   Clock,
@@ -168,21 +168,20 @@ export default function CandidateAvailabilityPage() {
         continue;
       }
 
-      const startIso = `${row.date}T${row.startTime}:00Z`;
-      const endIso = `${row.date}T${row.endTime}:00Z`;
+      // Anchor the typed wall-clock times to the selected timezone, then send
+      // offset-aware UTC ISO8601 (what the backend validates and stores).
+      const startIso = zonedWallTimeToISO(row.date, row.startTime, timezone);
+      const endIso = zonedWallTimeToISO(row.date, row.endTime, timezone);
 
-      const startDate = new Date(startIso);
-      const endDate = new Date(endIso);
-
-      if (endDate <= startDate) {
+      if (new Date(endIso) <= new Date(startIso)) {
         row.error = "End time must be later than start time.";
         hasValidationError = true;
         continue;
       }
 
       validatedWindows.push({
-        start_time: new Date(`${row.date}T${row.startTime}:00`).toISOString(),
-        end_time: new Date(`${row.date}T${row.endTime}:00`).toISOString(),
+        start_time: startIso,
+        end_time: endIso,
       });
     }
 

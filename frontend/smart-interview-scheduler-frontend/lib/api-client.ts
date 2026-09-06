@@ -3,18 +3,20 @@ import {
   User,
   CalendarStatusResponse,
   InterviewRequest,
+  InterviewParticipant,
   CreateInterviewPayload,
   SubmitAvailabilityPayload,
   BookSlotPayload,
   InterviewEvent,
   RecommendationRun,
+  RecommendedSlot,
   PaginatedResponse,
   ApiErrorResponse,
   CandidateAvailability,
 } from "./types";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api/v1";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "/api/v1";
 
 export class ApiClientError extends Error {
   public code: string;
@@ -38,7 +40,9 @@ export class ApiClientError extends Error {
   }
 }
 
+// ---------------------------------------------------------------------------
 // Token storage helpers
+// ---------------------------------------------------------------------------
 export function getStoredAccessToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem("sis_access_token");
@@ -49,10 +53,23 @@ export function getStoredRefreshToken(): string | null {
   return localStorage.getItem("sis_refresh_token");
 }
 
+/** Persist a full token pair (login / register-then-login). */
 export function storeTokens(tokens: AuthTokens) {
   if (typeof window === "undefined") return;
   localStorage.setItem("sis_access_token", tokens.access_token);
-  localStorage.setItem("sis_refresh_token", tokens.refresh_token);
+  if (tokens.refresh_token) {
+    localStorage.setItem("sis_refresh_token", tokens.refresh_token);
+  }
+}
+
+/**
+ * Persist ONLY a new access token. The backend `POST /auth/refresh` response is
+ * `{ access_token, token_type }` with no refresh token — the existing refresh
+ * token must survive untouched.
+ */
+export function storeAccessToken(accessToken: string) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("sis_access_token", accessToken);
 }
 
 export function clearStoredTokens() {
@@ -60,6 +77,8 @@ export function clearStoredTokens() {
   localStorage.removeItem("sis_access_token");
   localStorage.removeItem("sis_refresh_token");
   localStorage.removeItem("sis_demo_user");
+  _selfCache = null;
+  _directoryCache = null;
 }
 
 let isRefreshing = false;
@@ -67,7 +86,7 @@ let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
   const refreshToken = getStoredRefreshToken();
-  if (!refreshToken) return null;
+  if (!refreshToken || refreshToken === "undefined") return null;
 
   try {
     const res = await fetch(`${API_BASE_URL}/auth/refresh`, {
@@ -81,8 +100,13 @@ async function refreshAccessToken(): Promise<string | null> {
       return null;
     }
 
-    const data: AuthTokens = await res.json();
-    storeTokens(data);
+    const data: { access_token?: string } = await res.json();
+    if (!data.access_token) {
+      clearStoredTokens();
+      return null;
+    }
+    // Update ONLY the access token; keep the existing refresh token.
+    storeAccessToken(data.access_token);
     return data.access_token;
   } catch {
     clearStoredTokens();
@@ -180,13 +204,160 @@ async function request<T>(
 }
 
 /* =========================================================
+   BACKEND RESPONSE SHAPES + ADAPTERS
+   ─────────────────────────────────────────────────────────
+   The FastAPI contracts differ from the enriched shapes the
+   UI was built against. These adapters translate centrally
+   so pages/components keep using the frontend `types.ts`
+   models unchanged.
+========================================================= */
+
+interface BackendParticipant {
+  user_id: string;
+  role_in_interview: "CANDIDATE" | "PANELIST";
+  response_status: "PENDING" | "ACCEPTED" | "DECLINED";
+}
+
+interface BackendInterviewEvent {
+  id: string;
+  interview_request_id: string;
+  start_time: string;
+  end_time: string;
+  calendar_event_id: string;
+  meeting_link: string | null;
+  status: string;
+  created_at: string;
+}
+
+interface BackendInterview {
+  id: string;
+  candidate_id: string;
+  created_by: string;
+  round_type: InterviewRequest["round_type"];
+  duration_minutes: number;
+  buffer_minutes: number;
+  status: InterviewRequest["status"];
+  created_at: string;
+  participants: BackendParticipant[];
+  recommended_slots?: RecommendedSlot[] | null;
+  booked_event?: BackendInterviewEvent | null;
+}
+
+interface BackendAvailability {
+  id: string;
+  interview_request_id: string;
+  candidate_id: string;
+  timezone: string;
+  submitted_at: string;
+  windows: { start_time: string; end_time: string }[];
+}
+
+// Cached current profile + ADMIN user directory, used to enrich participant
+// identity that the interview payloads themselves do not carry.
+let _selfCache: User | null = null;
+let _directoryCache: Record<string, User> | null = null;
+
+export function setCachedProfile(user: User | null) {
+  _selfCache = user;
+}
+
+async function loadDirectory(): Promise<Record<string, User>> {
+  if (_directoryCache) return _directoryCache;
+  try {
+    const [candidates, panelists] = await Promise.all([
+      request<User[]>("/users?role=CANDIDATE"),
+      request<User[]>("/users?role=PANELIST"),
+    ]);
+    const map: Record<string, User> = {};
+    for (const u of [...candidates, ...panelists]) map[u.id] = u;
+    _directoryCache = map;
+  } catch (err) {
+    // Non-ADMIN callers get 403 here — enrichment falls back to the caller's own
+    // profile plus generic labels, which is all a candidate/panelist can see.
+    // Cache the empty result only for a definite 403; let transient failures retry.
+    const empty: Record<string, User> = {};
+    if (err instanceof ApiClientError && err.statusCode === 403) {
+      _directoryCache = empty;
+    }
+    return empty;
+  }
+  return _directoryCache;
+}
+
+function resolveName(id: string, dir: Record<string, User>, fallback: string): string {
+  return dir[id]?.name ?? (_selfCache?.id === id ? _selfCache.name : fallback);
+}
+function resolveEmail(id: string, dir: Record<string, User>): string {
+  return dir[id]?.email ?? (_selfCache?.id === id ? _selfCache.email : "");
+}
+function resolveTimezone(id: string, dir: Record<string, User>): string {
+  return dir[id]?.timezone ?? (_selfCache?.id === id ? _selfCache.timezone : "UTC");
+}
+
+function adaptEvent(e: BackendInterviewEvent): InterviewEvent {
+  return {
+    id: e.id,
+    interview_id: e.interview_request_id,
+    start_time: e.start_time,
+    end_time: e.end_time,
+    calendar_event_id: e.calendar_event_id,
+    meeting_link: e.meeting_link,
+    status: e.status === "CANCELLED" ? "CANCELLED" : "CONFIRMED",
+    created_at: e.created_at,
+  };
+}
+
+function adaptAvailability(a: BackendAvailability): CandidateAvailability {
+  return {
+    id: a.id,
+    interview_id: a.interview_request_id,
+    timezone: a.timezone,
+    submitted_at: a.submitted_at,
+    windows: a.windows.map((w) => ({
+      start_time: w.start_time,
+      end_time: w.end_time,
+    })),
+  };
+}
+
+function adaptInterview(
+  raw: BackendInterview,
+  dir: Record<string, User>
+): InterviewRequest {
+  const panelists: InterviewParticipant[] = raw.participants
+    .filter((p) => p.role_in_interview === "PANELIST")
+    .map((p) => ({
+      id: p.user_id,
+      user_id: p.user_id,
+      name: resolveName(p.user_id, dir, "Panelist"),
+      email: resolveEmail(p.user_id, dir),
+      role: "PANELIST",
+      timezone: dir[p.user_id]?.timezone,
+      calendar_status: undefined,
+    }));
+
+  return {
+    id: raw.id,
+    candidate_id: raw.candidate_id,
+    candidate_name: resolveName(raw.candidate_id, dir, "Candidate"),
+    candidate_email: resolveEmail(raw.candidate_id, dir),
+    candidate_timezone: resolveTimezone(raw.candidate_id, dir),
+    round_type: raw.round_type,
+    duration_minutes: raw.duration_minutes,
+    buffer_minutes: raw.buffer_minutes,
+    status: raw.status,
+    panelists,
+    created_at: raw.created_at,
+    latest_recommendations: raw.recommended_slots ?? null,
+    event: raw.booked_event ? adaptEvent(raw.booked_event) : null,
+  };
+}
+
+/* =========================================================
    DEMO MODE
    ─────────────────────────────────────────────────────────
-   Activated only when NEXT_PUBLIC_DEMO_MODE="true" in the
-   local environment. Provides synthetic auth responses so
-   the UI can be explored without a running FastAPI backend.
-   Scheduling, booking, and calendar APIs remain fully real
-   (they will surface errors when backend is unavailable).
+   Activated only when NEXT_PUBLIC_DEMO_MODE="true". Provides
+   synthetic auth + data so the UI runs with no backend.
 ========================================================= */
 const IS_DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -239,22 +410,18 @@ export const authApi = {
     email: string;
     password: string;
     name: string;
-    role: "ADMIN" | "PANELIST" | "CANDIDATE";
     timezone: string;
-  }): Promise<User> {
+  }): Promise<{ id: string; email: string; name: string; role: string }> {
     if (IS_DEMO_MODE) {
-      const user = buildDemoUser(payload.email, payload.name, payload.role);
-      const tokens = buildDemoTokens(payload.role);
-      storeTokens(tokens);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("sis_demo_user", JSON.stringify(user));
-      }
-      return user;
+      const user = buildDemoUser(payload.email, payload.name, "CANDIDATE");
+      return { id: user.id, email: user.email, name: user.name, role: user.role };
     }
-    return request<User>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    // Backend creates a CANDIDATE regardless of any role hint and returns no
+    // token — the caller logs in immediately afterwards.
+    return request<{ id: string; email: string; name: string; role: string }>(
+      "/auth/register",
+      { method: "POST", body: JSON.stringify(payload) }
+    );
   },
 
   async login(payload: { email: string; password: string }): Promise<AuthTokens> {
@@ -276,32 +443,13 @@ export const authApi = {
     return tokens;
   },
 
-  async googleLogin(idToken: string): Promise<AuthTokens> {
-    if (IS_DEMO_MODE) {
-      // Default Google demo sign-in to ADMIN role
-      const user = buildDemoUser("admin@demo.local", "Demo Admin", "ADMIN");
-      const tokens = buildDemoTokens("ADMIN");
-      storeTokens(tokens);
-      if (typeof window !== "undefined") {
-        localStorage.setItem("sis_demo_user", JSON.stringify(user));
-      }
-      return tokens;
-    }
-    const tokens = await request<AuthTokens>("/auth/google", {
-      method: "POST",
-      body: JSON.stringify({ id_token: idToken }),
-    });
-    storeTokens(tokens);
-    return tokens;
-  },
-
   async logout(): Promise<void> {
     clearStoredTokens();
   },
 };
 
 /* =========================================================
-   IN-MEMORY DEMO DATA (FOR STANDALONE FRONTEND EXECUTION)
+   IN-MEMORY DEMO DATA (STANDALONE FRONTEND EXECUTION)
 ========================================================= */
 const DEMO_USERS: User[] = [
   {
@@ -441,6 +589,7 @@ let DEMO_INTERVIEWS: InterviewRequest[] = [
     ],
     event: {
       id: "evt-102",
+      interview_id: "int-102",
       calendar_event_id: "cal-evt-google-102",
       start_time: new Date(Date.now() + 172800000).toISOString(),
       end_time: new Date(Date.now() + 175500000).toISOString(),
@@ -469,7 +618,6 @@ export const usersApi = {
             }
           }
         }
-        // Derive role from token shape as fallback
         const role: DemoRole = token.includes("admin")
           ? "ADMIN"
           : token.includes("panelist")
@@ -478,7 +626,9 @@ export const usersApi = {
         return buildDemoUser(`${role.toLowerCase()}@demo.local`, undefined, role);
       }
     }
-    return request<User>("/users/me");
+    const me = await request<User>("/users/me");
+    _selfCache = me;
+    return me;
   },
 
   async getCandidates(): Promise<User[]> {
@@ -513,24 +663,11 @@ export const calendarApi = {
 
   async connect(): Promise<{ authorization_url: string }> {
     if (IS_DEMO_MODE) {
-      return { authorization_url: "/calendar/callback?code=demo_code&state=demo_state" };
+      return { authorization_url: "/calendar/connected" };
     }
     return request<{ authorization_url: string }>("/calendar/connect", {
       method: "POST",
     });
-  },
-
-  async handleCallback(code: string, state: string): Promise<CalendarStatusResponse> {
-    if (IS_DEMO_MODE) {
-      return {
-        status: "CONNECTED",
-        last_synced_at: new Date().toISOString(),
-        panelist_name: "Demo User",
-      };
-    }
-    return request<CalendarStatusResponse>(
-      `/calendar/callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`
-    );
   },
 };
 
@@ -547,18 +684,38 @@ export const interviewsApi = {
         total: DEMO_INTERVIEWS.length,
       };
     }
-    return request<PaginatedResponse<InterviewRequest>>(
-      `/interviews?page=${page}&size=${size}`
-    );
+    const [raw, dir] = await Promise.all([
+      request<PaginatedResponse<BackendInterview>>(
+        `/interviews?page=${page}&size=${size}`
+      ),
+      loadDirectory(),
+    ]);
+    return {
+      ...raw,
+      items: raw.items.map((i) => adaptInterview(i, dir)),
+    };
   },
 
   async getById(id: string): Promise<InterviewRequest> {
     if (IS_DEMO_MODE) {
       const match = DEMO_INTERVIEWS.find((i) => i.id === id);
-      if (match) return match;
-      return DEMO_INTERVIEWS[0];
+      return match || DEMO_INTERVIEWS[0];
     }
-    return request<InterviewRequest>(`/interviews/${id}`);
+    const [raw, dir] = await Promise.all([
+      request<BackendInterview>(`/interviews/${id}`),
+      loadDirectory(),
+    ]);
+    const interview = adaptInterview(raw, dir);
+    // Candidate availability lives on its own endpoint (404 before submission).
+    try {
+      const avail = await request<BackendAvailability>(
+        `/interviews/${id}/availability`
+      );
+      interview.availability = adaptAvailability(avail);
+    } catch {
+      interview.availability = null;
+    }
+    return interview;
   },
 
   async create(payload: CreateInterviewPayload): Promise<InterviewRequest> {
@@ -589,10 +746,14 @@ export const interviewsApi = {
       DEMO_INTERVIEWS = [newInterview, ...DEMO_INTERVIEWS];
       return newInterview;
     }
-    return request<InterviewRequest>("/interviews", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const [raw, dir] = await Promise.all([
+      request<BackendInterview>("/interviews", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+      loadDirectory(),
+    ]);
+    return adaptInterview(raw, dir);
   },
 
   async update(id: string, payload: Partial<CreateInterviewPayload>): Promise<InterviewRequest> {
@@ -600,10 +761,14 @@ export const interviewsApi = {
       const existing = DEMO_INTERVIEWS.find((i) => i.id === id) || DEMO_INTERVIEWS[0];
       return existing;
     }
-    return request<InterviewRequest>(`/interviews/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
+    const [raw, dir] = await Promise.all([
+      request<BackendInterview>(`/interviews/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+      loadDirectory(),
+    ]);
+    return adaptInterview(raw, dir);
   },
 };
 
@@ -630,13 +795,14 @@ export const availabilityApi = {
       }
       return avail;
     }
-    return request<CandidateAvailability>(
+    const raw = await request<BackendAvailability>(
       `/interviews/${interviewId}/candidate-availability`,
       {
         method: "POST",
         body: JSON.stringify(payload),
       }
     );
+    return adaptAvailability(raw);
   },
 
   async get(interviewId: string): Promise<CandidateAvailability> {
@@ -656,7 +822,10 @@ export const availabilityApi = {
         ],
       };
     }
-    return request<CandidateAvailability>(`/interviews/${interviewId}/availability`);
+    const raw = await request<BackendAvailability>(
+      `/interviews/${interviewId}/availability`
+    );
+    return adaptAvailability(raw);
   },
 };
 
@@ -691,6 +860,8 @@ export const schedulingApi = {
         slots,
       };
     }
+    // Backend response is { recommendation_run_id, slots: SlotOut[] } — SlotOut
+    // matches RecommendedSlot exactly, so no per-slot adaptation is needed.
     return request<RecommendationRun>(`/interviews/${interviewId}/recommendations`, {
       method: "POST",
     });
@@ -721,9 +892,13 @@ export const bookingApi = {
       }
       return event;
     }
-    return request<InterviewEvent>(`/interviews/${interviewId}/book`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+    const raw = await request<BackendInterviewEvent>(
+      `/interviews/${interviewId}/book`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
+    return adaptEvent(raw);
   },
 };

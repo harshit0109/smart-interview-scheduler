@@ -3,8 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { schedulingApi, interviewsApi } from "@/lib/api-client";
-import { RecommendationRun, InterviewRequest } from "@/lib/types";
+import { interviewsApi } from "@/lib/api-client";
+import { RecommendedSlot, InterviewRequest } from "@/lib/types";
 import { RecommendationCard } from "@/components/shared/RecommendationCard";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Clock, Info } from "lucide-react";
@@ -14,16 +14,18 @@ export default function CandidateRecommendationsPage() {
   const interviewId = params.id as string;
 
   const [interview, setInterview] = React.useState<InterviewRequest | null>(null);
-  const [recommendations, setRecommendations] = React.useState<RecommendationRun | null>(null);
+  const [slots, setSlots] = React.useState<RecommendedSlot[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
 
   React.useEffect(() => {
     const load = async () => {
       try {
+        // Read-only for the candidate: the latest recommendation run is exposed
+        // on the interview detail payload. Do NOT POST /recommendations here —
+        // that re-runs the scheduling engine.
         const inv = await interviewsApi.getById(interviewId);
         setInterview(inv);
-        const recs = await schedulingApi.getRecommendations(interviewId);
-        setRecommendations(recs);
+        setSlots(inv.latest_recommendations ?? []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -63,9 +65,9 @@ export default function CandidateRecommendationsPage() {
         <div className="py-16 text-center text-xs text-slate-500">
           Loading recommended times...
         </div>
-      ) : recommendations?.slots && recommendations.slots.length > 0 ? (
+      ) : slots.length > 0 ? (
         <div className="space-y-4">
-          {recommendations.slots.map((slot) => (
+          {slots.map((slot) => (
             <RecommendationCard
               key={slot.id}
               slot={slot}

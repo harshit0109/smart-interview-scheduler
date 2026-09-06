@@ -103,3 +103,45 @@ export function getSystemTimezone(): string {
 export function formatScorePercent(score: number): number {
   return Math.round(score * 100);
 }
+
+/**
+ * Convert a wall-clock date + time typed by the user, interpreted in `timeZone`,
+ * into a UTC ISO8601 string (with offset). The backend stores availability
+ * windows as offset-aware instants plus a separate timezone label, so the wall
+ * time must be anchored to the *selected* zone — not the browser's zone.
+ *
+ * ponytail: uses the standard Intl offset trick; may be off by up to the DST
+ * gap for a time that falls inside a spring-forward/fall-back transition hour.
+ */
+export function zonedWallTimeToISO(
+  dateStr: string,
+  timeStr: string,
+  timeZone: string
+): string {
+  const guess = new Date(`${dateStr}T${timeStr}:00Z`);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+    .formatToParts(guess)
+    .reduce<Record<string, string>>((acc, p) => {
+      if (p.type !== "literal") acc[p.type] = p.value;
+      return acc;
+    }, {});
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour === "24" ? "0" : parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  const offset = asUTC - guess.getTime();
+  return new Date(guess.getTime() - offset).toISOString();
+}

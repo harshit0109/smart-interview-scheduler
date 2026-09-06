@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-06 — Backend Phase 8 (Booking Confirmation) complete and committed (`290af4f`). Phase 9 (POST-MVP: decline / reschedule / cancel / audit / reminders / self-service) implemented, verified, awaiting commit approval. Analytics (item 6) deferred.
+**Last updated:** 2026-09-06 — Backend Phases 1–9 complete and committed on `main`. **Phase 10 — frontend/backend integration** done: the Next.js 14 frontend (subtree-checked into `frontend/smart-interview-scheduler-frontend/`) is now wired to the **real backend** (mock/demo auth removed), talking to it through a Next.js **same-origin `/api` rewrite proxy** (no backend CORS). One minimal backend capability added: `GET /api/v1/users?role=CANDIDATE|PANELIST` (ADMIN-only) for interview-creation user discovery (FR-012). Google Identity login **deferred**; Post-MVP lifecycle UI (decline/reschedule/cancel/audit) **not built in the frontend**; `docker-compose` frontend container **deferred**.
 
 ---
 
@@ -305,6 +305,60 @@ Detail: `CODING_GUIDELINES.md`, `requirements.md` §7–§10, `DB_DESIGN.md`.
     **19 routes**. Frozen engine `git diff` empty. No token in any schema, log, audit row, or
     reconciliation metadata (asserted).
 
+- **2026-09-06 — Phase 10: Frontend ↔ backend integration.** *Awaiting commit approval.* Frozen
+  Phase 5 engine untouched; **no existing backend endpoint changed**; no migration/dep/table added
+  on the backend.
+  - **Backend (additive only):** `GET /api/v1/users?role=CANDIDATE|PANELIST` — ADMIN-only
+    (`require_role("ADMIN")`), `role` required + `Literal["CANDIDATE","PANELIST"]` (else 422),
+    returns `[{id,name,email,timezone,role}]` ordered by name. New `app/users/service.py`
+    (`list_by_role`), new `tests/test_users.py` (5 tests). **No `calendar_status`** in the payload
+    (not MVP-required; connectivity is still enforced + panelist-named at the recommendation step).
+    Rationale: FR-012 needs candidate/panelist id + name discovery and `API_DESIGN.md` had no
+    user-list endpoint — smallest change that unblocks the ADMIN create flow and lets all identity
+    display be solved in the frontend adapter without touching the frozen `InterviewRequestOut`.
+  - **Frontend** (`frontend/smart-interview-scheduler-frontend/`):
+    - **Transport:** `next.config.mjs` `rewrites()` proxies `/api/:path*` →
+      `${BACKEND_ORIGIN}/api/:path*` (default `http://localhost:8000`). Browser always calls
+      same-origin `/api/v1/...` (`NEXT_PUBLIC_API_BASE_URL=/api/v1`). **No backend CORS.**
+      `BACKEND_ORIGIN` is server-side only and is **baked at `next build` time** (`next dev`
+      re-reads it per request).
+    - **Auth:** `lib/auth-context.tsx` mock/localStorage auth removed; real backend-wired impl
+      activated (`login` → `/auth/login` → `/users/me`; `register` → `/auth/register` → immediate
+      `login`; boot rehydrate; logout clears tokens + caches). **Refresh-token fix:**
+      `POST /auth/refresh` returns only `{access_token, token_type}` — new `storeAccessToken()`
+      updates only the access token and never overwrites the refresh token with `undefined`.
+    - **Adapter layer** (`lib/api-client.ts`): central backend→frontend mapping —
+      `booked_event`→`event`, `recommended_slots`→`latest_recommendations`,
+      `interview_request_id`→`interview_id`, participants → enriched `panelists[]` /
+      `candidate_*` via a cached ADMIN user-directory fetch (non-ADMIN → 403 → falls back to the
+      caller's own profile + generic labels), plus a side fetch of
+      `GET /interviews/{id}/availability` attached as `.availability`.
+    - **OAuth callback:** aligned to the existing backend 302 flow — new
+      `app/calendar/connected/page.tsx` + `app/calendar/error/page.tsx`; the incorrect JSON
+      `app/calendar/callback/page.tsx` deleted. Backend callback architecture unchanged.
+    - **Registration UI:** role selector removed — self-registration creates a **CANDIDATE**
+      (backend decision C1); Admin/Panelist accounts are provisioned out-of-band.
+    - **Google Identity login: deferred** — removed from the UI/client rather than left as a
+      misleading mock. Re-add needs GIS + `google_login_oauth_client_id` on both sides.
+    - **Post-MVP lifecycle UI (decline/reschedule/cancel/audit): not implemented** — backend
+      endpoints stay available without a frontend surface.
+    - Fixes: candidate availability times anchored to the selected IANA zone
+      (`lib/utils.ts` `zonedWallTimeToISO`); candidate recommendations page reads
+      `latest_recommendations` from the detail payload instead of re-`POST`ing `/recommendations`.
+    - Tooling: `.eslintrc.json` added (`next/core-web-vitals`) + devDeps `eslint` +
+      `eslint-config-next` (lint was previously unconfigured).
+  - **Verified:** backend `ruff` clean, `pytest` **171 passed + 1 skipped** (+5 `test_users.py`,
+    zero Phase 1–9 regression, 4 Phase 7 gate tests green). Frontend `npm ci` ok, `next lint`
+    clean (3 pre-existing `exhaustive-deps` warnings), `tsc --noEmit` clean, `next build` ok
+    (22 routes; `/calendar/connected` + `/calendar/error` present, `/calendar/callback` gone).
+    Live smoke test (Next prod server → proxy → backend-from-source → docker PG/Redis): register
+    ignores `role` → CANDIDATE; ADMIN directory 200 + non-ADMIN 403 + bad role 422; refresh
+    returns access-token only; ADMIN `POST /interviews` with directory-resolved ids →
+    `AWAITING_CANDIDATE_AVAILABILITY`.
+  - **Deferred:** `docker-compose.yml` frontend service — no frontend `Dockerfile` yet and the
+    commented stub points at the wrong context path; needs a multi-stage Dockerfile +
+    `output: "standalone"` + build-time `BACKEND_ORIGIN`. `docker-compose.yml` left untouched.
+
 ### Current backend structure
 
 ```
@@ -312,7 +366,7 @@ backend/
 ├── app/
 │   ├── main.py            # FastAPI app + GET /health + /api/v1 routers
 │   ├── auth/              # register / login / google / refresh
-│   ├── users/             # GET /users/me
+│   ├── users/             # GET /users/me  +  GET /users?role= (ADMIN directory, Phase 10)
 │   ├── interviews/        # POST/GET/GET{id}/PATCH /interviews
 │   ├── availability/      # POST/GET candidate availability (nested under /interviews/{id})
 │   ├── calendar/          # Calendar OAuth connect/callback/status + free/busy + event create/delete (client seam)
@@ -349,11 +403,13 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
 
 ## 6. In progress / next immediate task
 
-- **In progress:** **Phase 9 — POST-MVP** — implemented and verified locally, awaiting commit
-  approval. `app/interviews/lifecycle.py` (+ 4 routes), `admin_or_owning_candidate()` dep,
-  generalised notifications, `scripts/send_reminders.py`. No new tables / migrations / deps /
-  invented endpoints. **Analytics (item 6) deferred** — no API_DESIGN endpoint exists and the
-  phase forbids inventing one.
+- **In progress:** **Phase 10 — frontend/backend integration** — implemented and verified
+  locally, awaiting commit approval. Backend: `GET /users?role=` (ADMIN directory) + tests, no
+  other backend change. Frontend: real-auth wiring, same-origin proxy, central response-adapter
+  layer, OAuth landing pages, availability-timezone fix. **Deferred:** Google Identity login,
+  Post-MVP lifecycle UI, `docker-compose` frontend container. See §5 + §7.
+- **Backend Phases 1–9:** complete, committed, and pushed to `main`. Analytics (Phase 9 item 6)
+  deferred — no API_DESIGN endpoint and the phase forbids inventing one.
 - **Phase 9 decisions taken (see §7):** D-1 lifecycle lives in `app/interviews/`; D-2 scope =
   items 1–5 (reminders as a cron script); D-3 `send_reminders.py`, 24h default window; D-4
   analytics deferred; D-5 the decline/reschedule response is the value at the transition point
@@ -364,14 +420,39 @@ All MVP + Post-MVP module folders now exist. No new module folders expected befo
 - **MVP Acceptance Gate:** Phase 7's 4 mandatory tests pass and are committed (`82764be`); still
   green after Phases 8–9. **Remaining for full sign-off: a green CI run + a real end-to-end demo
   against a live Google account** (+ optionally a real SendGrid key for a live `SENT`).
-- **Next:** Phase 10 (frontend — teammate) / Phase 11 (resilience & security hardening) /
-  Phase 12 (docs + bonus). Backend Post-MVP items done except analytics.
+- **Next:** Phase 11 (resilience & security hardening) / Phase 12 (docs + bonus). Also open:
+  Google Identity login end-to-end, `docker-compose` frontend service, real end-to-end demo
+  against a live Google account, green CI run.
 
 ---
 
 ## 7. Technical decisions log (append-only, newest first)
 
 Decisions made during the build that are **not** already in the frozen specs.
+
+- **2026-09-06 (Phase 10)** — Frontend/backend integration. **P10-1:** the frontend↔backend seam
+  uses a **Next.js same-origin rewrite proxy** (`/api/:path*` → `${BACKEND_ORIGIN}/api/:path*`),
+  **not** backend CORS — nothing about the backend host reaches the browser and there is no
+  preflight surface. `BACKEND_ORIGIN` is server-side only and frozen at `next build` time (fine
+  for Docker/CI build args; `next dev` re-reads it live). **P10-2:** `GET /api/v1/users?role=`
+  (ADMIN-only) was added because FR-012 (ADMIN creates a request naming candidate + panelists)
+  is un-serviceable through any UI without a user-discovery endpoint and `API_DESIGN.md` defined
+  none; it is additive (new route + `users/service.py`, no migration, no existing endpoint or
+  response contract changed). It deliberately **omits `calendar_status`** — not MVP-required, and
+  connectivity is already enforced + panelist-named at `POST /recommendations`. **P10-3:** all
+  other backend/frontend shape mismatches (`booked_event`/`recommended_slots`/`interview_request_id`
+  naming, participant enrichment, availability side-fetch) are resolved **only in the frontend
+  adapter layer** (`lib/api-client.ts`); the frozen `InterviewRequestOut` etc. are untouched.
+  **P10-4:** the mock/localStorage auth in `lib/auth-context.tsx` is deleted and the real
+  backend-wired implementation is the only one; `POST /auth/refresh` returning
+  `{access_token, token_type}` updates **only** the access token (never clobbers the refresh
+  token). **P10-5:** self-registration UI creates a **CANDIDATE** only (matches backend C1) — no
+  ADMIN/PANELIST self-serve. **P10-6:** Google Identity login is **deferred** and removed from the
+  UI/client (no misleading mock). **P10-7:** Post-MVP lifecycle UI (decline/reschedule/cancel/
+  audit) is **not built** — backend endpoints remain available headless. **P10-8:** the
+  `docker-compose` frontend service stays **deferred/commented** until a frontend `Dockerfile`
+  (multi-stage, `output: "standalone"`, build-time `BACKEND_ORIGIN`) exists; `docker-compose.yml`
+  was not modified this phase.
 
 - **2026-09-06 (Phase 9)** — POST-MVP lifecycle. **D-1:** `decline` / `reschedule` / `cancel` /
   `audit` live in `app/interviews/lifecycle.py` on the existing `interviews_router` (the module
