@@ -177,6 +177,11 @@ export default function AdminInterviewDetailPage() {
           <p className="text-xs text-slate-500 mt-0.5">
             {interview.candidate_email} ({interview.candidate_timezone})
           </p>
+          {(interview.company || interview.title) && (
+            <p className="text-xs text-slate-600 mt-1 font-medium">
+              {[interview.company, interview.title].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

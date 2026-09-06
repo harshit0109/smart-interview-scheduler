@@ -243,6 +243,7 @@ interface BackendInterview {
   candidate_id: string;
   created_by: string;
   title?: string | null;
+  company?: string | null;
   round_type: InterviewRequest["round_type"];
   duration_minutes: number;
   buffer_minutes: number;
@@ -358,6 +359,7 @@ function adaptInterview(
     candidate_timezone: resolveTimezone(raw.candidate_id, dir),
     candidate_response_status: candidateParticipant?.response_status,
     title: raw.title ?? null,
+    company: raw.company ?? null,
     round_type: raw.round_type,
     duration_minutes: raw.duration_minutes,
     buffer_minutes: raw.buffer_minutes,
@@ -884,6 +886,7 @@ export const interviewsApi = {
         candidate_email: candidate.email,
         candidate_timezone: candidate.timezone,
         title: payload.title ?? null,
+        company: payload.company ?? null,
         round_type: payload.round_type,
         duration_minutes: payload.duration_minutes,
         buffer_minutes: payload.buffer_minutes,

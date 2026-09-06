@@ -78,11 +78,19 @@ async def send_booking_confirmation(
     panelist_emails: list[str],
     round_type: str,
     client: SendGridClient,
+    title: str | None = None,
+    company: str | None = None,
 ) -> str:
     """Exactly one CONFIRMATION row per successful booking."""
     link = event.meeting_link or "(a meeting link will follow separately)"
+    context = ""
+    if company:
+        context += f"Company: {company}\n"
+    if title:
+        context += f"Role:  {title}\n"
     body = (
         "Your interview is confirmed.\n\n"
+        f"{context}"
         f"Round: {round_type.title()}\n"
         f"When:  {_when(event)}\n"
         f"Join:  {link}\n\n"

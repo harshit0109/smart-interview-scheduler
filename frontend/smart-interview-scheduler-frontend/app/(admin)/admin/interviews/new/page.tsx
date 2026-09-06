@@ -187,6 +187,7 @@ export default function CreateInterviewPage() {
 
   // Interview details
   const [title, setTitle] = React.useState("");
+  const [company, setCompany] = React.useState("");
   const [roundType, setRoundType] = React.useState<RoundType>("TECHNICAL");
   const [durationMinutes, setDurationMinutes] = React.useState<number>(60);
   const [bufferMinutes, setBufferMinutes] = React.useState<number>(15);
@@ -308,6 +309,7 @@ export default function CreateInterviewPage() {
       const res = await interviewsApi.create({
         candidate_id: selectedCandidateId,
         title: title.trim() || undefined,
+        company: company.trim() || undefined,
         round_type: roundType,
         duration_minutes: durationMinutes,
         buffer_minutes: bufferMinutes,
@@ -494,6 +496,19 @@ export default function CreateInterviewPage() {
                 className="mt-1"
               />
               <p className="text-[11px] text-slate-400 mt-1">Optional — helps identify this request in lists.</p>
+            </div>
+
+            <div>
+              <Label htmlFor="company">Company</Label>
+              <Input
+                id="company"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder="e.g. Acme Corp"
+                maxLength={200}
+                className="mt-1"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">Optional — the hiring company shown to participants and in the calendar invite.</p>
             </div>
 
             <div>
@@ -820,13 +835,23 @@ export default function CreateInterviewPage() {
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4 text-xs">
-            <div>
-              <span className="text-slate-500 font-semibold uppercase tracking-wider block text-[11px]">
-                Job / Role
-              </span>
-              <p className="text-slate-900 font-bold text-sm mt-0.5">
-                {title.trim() || <span className="text-slate-400 font-normal italic">No title provided</span>}
-              </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <span className="text-slate-500 font-semibold uppercase tracking-wider block text-[11px]">
+                  Job / Role
+                </span>
+                <p className="text-slate-900 font-bold text-sm mt-0.5">
+                  {title.trim() || <span className="text-slate-400 font-normal italic">No title provided</span>}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500 font-semibold uppercase tracking-wider block text-[11px]">
+                  Company
+                </span>
+                <p className="text-slate-900 font-bold text-sm mt-0.5">
+                  {company.trim() || <span className="text-slate-400 font-normal italic">Not specified</span>}
+                </p>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-200">

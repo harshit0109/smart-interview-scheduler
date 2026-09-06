@@ -15,6 +15,7 @@ RoundType = Literal["SCREENING", "TECHNICAL", "MANAGERIAL", "HR"]
 class CreateInterviewRequest(BaseModel):
     candidate_id: uuid.UUID
     title: str | None = Field(default=None, max_length=200)
+    company: str | None = Field(default=None, max_length=200)
     round_type: RoundType
     duration_minutes: int = Field(gt=0)
     buffer_minutes: int = Field(default=15, ge=0)
@@ -55,6 +56,7 @@ class InterviewRequestOut(BaseModel):
     candidate_id: uuid.UUID
     created_by: uuid.UUID
     title: str | None = None
+    company: str | None = None
     round_type: str
     duration_minutes: int
     buffer_minutes: int

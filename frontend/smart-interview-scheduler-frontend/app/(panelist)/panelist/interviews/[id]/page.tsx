@@ -84,6 +84,11 @@ export default function PanelistInterviewDetailPage() {
           <h1 className="text-2xl font-bold text-slate-900 mt-0.5">
             Interview with {interview.candidate_name}
           </h1>
+          {(interview.company || interview.title) && (
+            <p className="text-xs text-slate-600 mt-1 font-medium">
+              {[interview.company, interview.title].filter(Boolean).join(" · ")}
+            </p>
+          )}
         </div>
         <StatusBadge status={interview.status} />
       </div>

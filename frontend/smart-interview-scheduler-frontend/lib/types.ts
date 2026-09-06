@@ -116,6 +116,7 @@ export interface InterviewRequest {
   candidate_timezone: string;
   candidate_response_status?: ParticipantResponseStatus;
   title?: string | null;
+  company?: string | null;
   round_type: RoundType;
   duration_minutes: number;
   buffer_minutes: number;
@@ -131,6 +132,7 @@ export interface InterviewRequest {
 export interface CreateInterviewPayload {
   candidate_id: string;
   title?: string;
+  company?: string;
   round_type: RoundType;
   duration_minutes: number;
   buffer_minutes: number;

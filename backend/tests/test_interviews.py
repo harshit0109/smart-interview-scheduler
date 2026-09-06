@@ -68,6 +68,29 @@ def test_create_without_title_returns_null(client, make_user):
     assert resp.json()["title"] is None
 
 
+def test_create_persists_and_returns_company(client, make_user):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+
+    resp = _create(client, admin, candidate, [panelist], company="Acme Corp")
+    assert resp.status_code == 201
+    assert resp.json()["company"] == "Acme Corp"
+
+    get_resp = client.get(f"{V1}/interviews/{resp.json()['id']}", headers=admin.headers)
+    assert get_resp.json()["company"] == "Acme Corp"
+
+
+def test_create_without_company_returns_null(client, make_user):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST")
+
+    resp = _create(client, admin, candidate, [panelist])
+    assert resp.status_code == 201
+    assert resp.json()["company"] is None
+
+
 def test_non_admin_cannot_create(client, make_user):
     candidate = make_user("CANDIDATE")
     panelist = make_user("PANELIST")

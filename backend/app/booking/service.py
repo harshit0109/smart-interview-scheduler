@@ -104,16 +104,28 @@ async def book(
             candidate_email = candidate.email
             panelist_emails = [u.email for _p, u in panelists]
             round_type = request.round_type
+            title = request.title
+            company = request.company
             organiser = await organiser_connection(db, panelists, client)
             # Capture the token now, while `organiser` is loaded — a later rollback
             # expires the row and an implicit reload would fail in async context.
             organiser_token = calendar_service.access_token_of(organiser)
 
+            _label = " · ".join(b for b in (company, title) if b)
+            summary = f"{request.round_type.title()} interview" + (
+                f" — {_label}" if _label else ""
+            )
+            _desc = ["Scheduled via Smart Interview Scheduler.", ""]
+            if company:
+                _desc.append(f"Company: {company}")
+            if title:
+                _desc.append(f"Role: {title}")
+            _desc.append(f"Round: {request.round_type.title()}")
             cal = await calendar_service.create_event(  # step 4 — OUTSIDE any DB transaction
                 organiser_token,
                 client,
-                summary=f"{request.round_type.title()} interview",
-                description="Scheduled via Smart Interview Scheduler.",
+                summary=summary,
+                description="\n".join(_desc),
                 start=slot.start_time,
                 end=slot.end_time,
                 attendee_emails=[candidate.email, *(u.email for _p, u in panelists)],
@@ -173,6 +185,8 @@ async def book(
             candidate_email=candidate_email,
             panelist_emails=panelist_emails,
             round_type=round_type,
+            title=title,
+            company=company,
             client=sendgrid,
         )
     except Exception:  # noqa: BLE001 - the booking succeeded; never let this undo it
