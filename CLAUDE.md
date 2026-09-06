@@ -1,5 +1,18 @@
 # CLAUDE.md
 
+## Project onboarding — read first
+
+Before continuing any work on this project, read **`PROJECT_CONTEXT.md`** in the repo root. It is
+the living session-to-session handoff: current phase, what is done, the next task, locked
+architecture decisions, backend layer boundaries, technical-decision log, and open questions.
+Then read the frozen spec docs relevant to the area you are touching: `requirements.md`,
+`IMPLEMENTATION.md`, `DB_DESIGN.md`, `API_DESIGN.md`, `CODING_GUIDELINES.md`.
+
+Backend is owned by Harshit; the frontend is owned by a teammate. Do not implement, modify, or
+redesign frontend functionality unless Harshit explicitly asks.
+
+---
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
