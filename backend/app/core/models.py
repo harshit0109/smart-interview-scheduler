@@ -140,6 +140,8 @@ class InterviewRequest(Base):
     status: Mapped[str] = mapped_column(
         String(40), nullable=False, server_default="DRAFT", index=True
     )
+    # Job / Role selected at creation. Nullable — legacy requests have none.
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -162,7 +164,7 @@ class InterviewParticipant(Base):
             name="ck_interview_participants_role",
         ),
         CheckConstraint(
-            "response_status IN ('PENDING','ACCEPTED','DECLINED')",
+            "response_status IN ('PENDING','ACCEPTED','DECLINED','UNAVAILABLE')",
             name="ck_interview_participants_response_status",
         ),
     )
@@ -187,6 +189,67 @@ class InterviewParticipant(Base):
     )
 
     request: Mapped["InterviewRequest"] = relationship(back_populates="participants")
+
+
+class ParticipantInvitation(Base):
+    """A tokenised invitation for one participant of one interview request.
+
+    The raw token is NEVER stored — only its SHA-256 hex digest (`token_hash`).
+    Resend rotates the token (new hash) in place, invalidating the old link.
+    Delivery state lives here, not in `notification_logs` (which is tied to
+    booked `interview_events`).
+    """
+
+    __tablename__ = "participant_invitations"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_participant_invitations_token_hash"),
+        UniqueConstraint(
+            "interview_request_id", "user_id",
+            name="uq_participant_invitations_request_user",
+        ),
+        CheckConstraint(
+            "role IN ('CANDIDATE','PANELIST')",
+            name="ck_participant_invitations_role",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','ACCEPTED','DECLINED','UNAVAILABLE','EXPIRED')",
+            name="ck_participant_invitations_status",
+        ),
+        CheckConstraint(
+            "delivery_status IN ('SENT','FAILED','SIMULATED')",
+            name="ck_participant_invitations_delivery_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    interview_request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("interview_requests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="PENDING"
+    )
+    requires_account_setup: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    send_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    delivery_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    response_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class CandidateAvailability(Base):
