@@ -9,10 +9,12 @@ import {
   InvitationRecord,
   InvitationSummary,
   ParticipantResponseStatus,
+  AuditEntry,
 } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InterviewTimeline } from "@/components/shared/InterviewTimeline";
+import { LifecycleActions } from "@/components/shared/LifecycleActions";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -48,6 +50,9 @@ export default function AdminInterviewDetailPage() {
   const [isIssuing, setIsIssuing] = React.useState(false);
   const [issueError, setIssueError] = React.useState<string | null>(null);
 
+  const [audit, setAudit] = React.useState<AuditEntry[] | null>(null);
+  const [auditOpen, setAuditOpen] = React.useState(false);
+
   const loadInvitations = React.useCallback(async () => {
     try {
       const rows = await invitationsApi.list(id);
@@ -59,20 +64,30 @@ export default function AdminInterviewDetailPage() {
     }
   }, [id]);
 
+  const loadInterview = React.useCallback(async () => {
+    try {
+      const data = await interviewsApi.getById(id);
+      setInterview(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [id]);
+
+  const loadAudit = React.useCallback(async () => {
+    try {
+      const res = await interviewsApi.getAudit(id);
+      setAudit(res.items);
+    } catch {
+      setAudit([]);
+    }
+  }, [id]);
+
   React.useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await interviewsApi.getById(id);
-        setInterview(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    load();
+    loadInterview();
     loadInvitations();
-  }, [id, loadInvitations]);
+  }, [loadInterview, loadInvitations]);
 
   const handleSendInvitations = async () => {
     setIsIssuing(true);
@@ -385,6 +400,71 @@ export default function AdminInterviewDetailPage() {
             </div>
           )}
         </CardContent>
+      </Card>
+
+      {/* Lifecycle actions — cancel any non-terminal request, reschedule a booked one */}
+      <LifecycleActions
+        interview={interview}
+        viewerRole="ADMIN"
+        viewerId={user?.id}
+        onDone={() => {
+          loadInterview();
+          loadInvitations();
+          if (auditOpen) loadAudit();
+        }}
+      />
+
+      {/* Audit trail */}
+      <Card className="border-slate-200 shadow-xs">
+        <CardHeader className="pb-3 flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-sm">Audit log</CardTitle>
+            <CardDescription className="text-xs">
+              Every recorded state change for this interview request, newest first.
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const next = !auditOpen;
+              setAuditOpen(next);
+              if (next && audit === null) loadAudit();
+            }}
+          >
+            {auditOpen ? "Hide" : "Show"}
+          </Button>
+        </CardHeader>
+        {auditOpen && (
+          <CardContent>
+            {audit === null ? (
+              <p className="text-xs text-slate-400 py-2">Loading audit entries…</p>
+            ) : audit.length === 0 ? (
+              <p className="text-xs text-slate-400 py-2">No audit entries recorded yet.</p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {audit.map((entry) => (
+                  <div key={entry.id} className="py-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-semibold text-slate-900">
+                        {entry.action.replaceAll("_", " ")}
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {formatDateTime(entry.created_at, user?.timezone)}
+                      </span>
+                    </div>
+                    <p className="text-slate-500 mt-0.5">
+                      by {entry.actor_role}
+                      {entry.metadata && typeof entry.metadata.reason === "string"
+                        ? ` — “${entry.metadata.reason}”`
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        )}
       </Card>
     </div>
   );

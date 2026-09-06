@@ -10,6 +10,7 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InterviewTimeline } from "@/components/shared/InterviewTimeline";
+import { LifecycleActions } from "@/components/shared/LifecycleActions";
 import { formatDateTime, formatTimeRange } from "@/lib/utils";
 import {
   Calendar,
@@ -30,19 +31,20 @@ export default function PanelistInterviewDetailPage() {
   const [interview, setInterview] = React.useState<InterviewRequest | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
 
-  React.useEffect(() => {
-    const load = async () => {
-      try {
-        const data = await interviewsApi.getById(id);
-        setInterview(data);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    load();
+  const load = React.useCallback(async () => {
+    try {
+      const data = await interviewsApi.getById(id);
+      setInterview(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   }, [id]);
+
+  React.useEffect(() => {
+    load();
+  }, [load]);
 
   if (isLoading) {
     return (
@@ -159,6 +161,13 @@ export default function PanelistInterviewDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      <LifecycleActions
+        interview={interview}
+        viewerRole="PANELIST"
+        viewerId={user?.id}
+        onDone={load}
+      />
     </div>
   );
 }

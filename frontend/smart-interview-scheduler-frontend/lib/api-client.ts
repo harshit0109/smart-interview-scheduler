@@ -20,6 +20,8 @@ import {
   InvitationPublic,
   InvitationRespondPayload,
   ClaimAccountPayload,
+  LifecycleStatusResponse,
+  AuditEntry,
 } from "./types";
 
 const API_BASE_URL =
@@ -915,6 +917,38 @@ export const interviewsApi = {
       loadDirectory(),
     ]);
     return adaptInterview(raw, dir);
+  },
+
+  // --- Phase 9 lifecycle (live backend only; no demo fixtures) --------------
+  // POST /interviews/{id}/decline  — an assigned PANELIST withdraws.
+  async decline(id: string, reason?: string): Promise<LifecycleStatusResponse> {
+    return request<LifecycleStatusResponse>(`/interviews/${id}/decline`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || null }),
+    });
+  },
+
+  // POST /interviews/{id}/reschedule  — ADMIN or the owning CANDIDATE; requires BOOKED.
+  async reschedule(id: string, reason?: string): Promise<LifecycleStatusResponse> {
+    return request<LifecycleStatusResponse>(`/interviews/${id}/reschedule`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || null }),
+    });
+  },
+
+  // POST /interviews/{id}/cancel  — ADMIN; any non-terminal request.
+  async cancel(id: string, reason?: string): Promise<LifecycleStatusResponse> {
+    return request<LifecycleStatusResponse>(`/interviews/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason: reason || null }),
+    });
+  },
+
+  // GET /interviews/{id}/audit  — ADMIN; newest first.
+  async getAudit(id: string, page = 0, size = 50): Promise<PaginatedResponse<AuditEntry>> {
+    return request<PaginatedResponse<AuditEntry>>(
+      `/interviews/${id}/audit?page=${page}&size=${size}`
+    );
   },
 };
 

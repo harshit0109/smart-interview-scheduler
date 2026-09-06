@@ -137,6 +137,23 @@ export interface CreateInterviewPayload {
   panelist_ids: string[];
 }
 
+/** Response of POST /interviews/{id}/decline|reschedule|cancel (Phase 9). */
+export interface LifecycleStatusResponse {
+  interview_request_status: string;
+}
+
+/** One row of GET /interviews/{id}/audit (ADMIN). */
+export interface AuditEntry {
+  id: string;
+  actor_id: string | null;
+  actor_role: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface ProvisionUserPayload {
   email: string;
   name: string;
