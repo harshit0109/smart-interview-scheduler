@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # First-ADMIN web bootstrap (Phase B). Empty ⇒ POST /auth/bootstrap-admin is
+    # not exposed at all (returns 404). When set, the endpoint accepts the value
+    # via the X-Bootstrap-Token header and only while zero ADMIN users exist.
+    admin_bootstrap_token: str = ""
+
     # Google IDENTITY login only (openid/email/profile). Never Calendar scopes.
     # Empty in dev/test; /auth/google returns 401 until configured.
     google_login_oauth_client_id: str = ""

@@ -30,6 +30,13 @@ interface AuthContextType {
     name: string;
     timezone: string;
   }) => Promise<User>;
+  bootstrapAdmin: (data: {
+    email: string;
+    password: string;
+    name: string;
+    timezone: string;
+    bootstrap_token: string;
+  }) => Promise<User>;
   logout: () => Promise<void>;
   refreshToken: () => Promise<void>;
   refreshCalendarStatus: () => Promise<void>;
@@ -132,6 +139,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
+  const bootstrapAdmin = async (data: {
+    email: string;
+    password: string;
+    name: string;
+    timezone: string;
+    bootstrap_token: string;
+  }): Promise<User> => {
+    setIsLoading(true);
+    try {
+      // Returns a full token pair on success; load the profile like login does.
+      await authApi.bootstrapAdmin(data);
+      const profile = await usersApi.getMe();
+      applyUser(profile);
+      await refreshCalendarStatus();
+      return profile;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await authApi.logout();
@@ -159,6 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         calendarStatus,
         login,
         register,
+        bootstrapAdmin,
         logout,
         refreshToken,
         refreshCalendarStatus,

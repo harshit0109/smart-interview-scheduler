@@ -424,6 +424,39 @@ export const authApi = {
     );
   },
 
+  /**
+   * First-ADMIN web bootstrap. Sends the shared secret in the X-Bootstrap-Token
+   * header. The backend only allows this while zero ADMIN users exist and 404s
+   * when ADMIN_BOOTSTRAP_TOKEN is unset — the frontend just surfaces the error.
+   */
+  async bootstrapAdmin(payload: {
+    email: string;
+    password: string;
+    name: string;
+    timezone: string;
+    bootstrap_token: string;
+  }): Promise<AuthTokens> {
+    if (IS_DEMO_MODE) {
+      const tokens = buildDemoTokens("ADMIN", payload.email);
+      storeTokens(tokens);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(
+          "sis_demo_user",
+          JSON.stringify(buildDemoUser(payload.email, payload.name, "ADMIN"))
+        );
+      }
+      return tokens;
+    }
+    const { bootstrap_token, ...body } = payload;
+    const tokens = await request<AuthTokens>("/auth/bootstrap-admin", {
+      method: "POST",
+      headers: { "X-Bootstrap-Token": bootstrap_token },
+      body: JSON.stringify(body),
+    });
+    storeTokens(tokens);
+    return tokens;
+  },
+
   async login(payload: { email: string; password: string }): Promise<AuthTokens> {
     if (IS_DEMO_MODE) {
       const role = demoRoleFromEmail(payload.email);

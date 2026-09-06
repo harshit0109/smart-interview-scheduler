@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import schemas, service
@@ -21,6 +21,19 @@ DbDep = Annotated[AsyncSession, Depends(get_db)]
 async def register(data: schemas.RegisterRequest, db: DbDep) -> schemas.RegisterResponse:
     user = await service.register(db, data)
     return schemas.RegisterResponse(id=user.id, email=user.email, name=user.name, role=user.role)
+
+
+@router.post(
+    "/bootstrap-admin",
+    response_model=schemas.TokenPair,
+    status_code=status.HTTP_201_CREATED,
+)
+async def bootstrap_admin(
+    data: schemas.BootstrapAdminRequest,
+    db: DbDep,
+    x_bootstrap_token: Annotated[str | None, Header()] = None,
+) -> schemas.TokenPair:
+    return await service.bootstrap_admin(db, data, x_bootstrap_token)
 
 
 @router.post("/login", response_model=schemas.TokenPair)

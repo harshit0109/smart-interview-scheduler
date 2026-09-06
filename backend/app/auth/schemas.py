@@ -26,6 +26,11 @@ class RegisterRequest(BaseModel):
         return valid_iana_timezone(v)
 
 
+class BootstrapAdminRequest(RegisterRequest):
+    """First-ADMIN web bootstrap. Same field + password rules as registration —
+    the admin chooses their own password; no server-generated temporary one."""
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str

@@ -54,7 +54,7 @@ _LUA_FIXED_WINDOW = (
 # First match wins; order = most specific first. `bucket` keeps a caller's
 # strict / standard / rec / book budgets in separate Redis keys.
 _RULES: list[tuple[str, re.Pattern[str], str, str]] = [
-    ("POST", re.compile(r"/auth/(login|register|google|refresh)"), "strict",
+    ("POST", re.compile(r"/auth/(login|register|google|refresh|bootstrap-admin)"), "strict",
      "rate_limit_strict_per_minute"),
     ("GET", re.compile(r"/calendar/callback"), "strict", "rate_limit_strict_per_minute"),
     ("POST", re.compile(r"/interviews/[^/]+/recommendations"), "rec",

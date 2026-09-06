@@ -164,6 +164,18 @@ class RequestAlreadyTerminalError(AppError):
     message = "This interview request is already cancelled or completed."
 
 
+class RoleConflictError(AppError):
+    status_code = 422
+    code = "ROLE_CONFLICT"
+    message = "An account with this email already exists with a different role."
+
+
+class AdminAlreadyExistsError(AppError):
+    status_code = 409
+    code = "ADMIN_ALREADY_EXISTS"
+    message = "An administrator account already exists. Bootstrap is disabled."
+
+
 def _envelope(code: str, message: str, field_errors: dict | None, trace_id: str) -> dict:
     return {
         "error": {
