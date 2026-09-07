@@ -19,7 +19,10 @@ class CreateInterviewRequest(BaseModel):
     round_type: RoundType
     duration_minutes: int = Field(gt=0)
     buffer_minutes: int = Field(default=15, ge=0)
-    panelist_ids: list[uuid.UUID] = Field(min_length=1)
+    # Optional: with none selected, the creating admin is recorded as the
+    # interviewer (the scheduling engine still needs exactly one non-candidate
+    # participant, and the admin's own connected calendar becomes the organiser).
+    panelist_ids: list[uuid.UUID] = Field(default_factory=list)
 
     @field_validator("panelist_ids")
     @classmethod

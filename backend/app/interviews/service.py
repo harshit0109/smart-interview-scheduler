@@ -72,6 +72,10 @@ async def create_request(
     db: AsyncSession, actor: User, data: schemas.CreateInterviewRequest
 ) -> schemas.InterviewRequestOut:
     await _resolve_roles(db, data.candidate_id, data.panelist_ids)
+    # No external interviewer selected -> the creating admin runs the interview.
+    # The engine needs one non-candidate participant and booking needs an
+    # organiser calendar; the admin fills both (their own Google connection).
+    effective_panelists = list(data.panelist_ids) or [actor.id]
     request = await repository.create(
         db,
         candidate_id=data.candidate_id,
@@ -81,7 +85,7 @@ async def create_request(
         round_type=data.round_type,
         duration_minutes=data.duration_minutes,
         buffer_minutes=data.buffer_minutes,
-        panelist_ids=data.panelist_ids,
+        panelist_ids=effective_panelists,
         status=INITIAL_STATUS,
     )
     await record_audit(

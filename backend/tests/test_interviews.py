@@ -139,13 +139,18 @@ def test_create_rejects_non_panelist_in_panelist_ids(client, make_user):
     assert resp.status_code == 422
 
 
-def test_create_requires_at_least_one_panelist(client, make_user):
+def test_create_with_zero_panelists_records_the_creating_admin_as_interviewer(
+    client, make_user
+):
     admin = make_user("ADMIN")
     candidate = make_user("CANDIDATE")
     resp = client.post(
         f"{V1}/interviews", json=_payload(candidate.id, []), headers=admin.headers
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 201, resp.text
+    parts = resp.json()["participants"]
+    panelist_ids = {p["user_id"] for p in parts if p["role_in_interview"] == "PANELIST"}
+    assert panelist_ids == {str(admin.id)}  # the admin fills the interviewer slot
 
 
 def test_create_rejects_non_positive_duration(client, make_user):

@@ -290,10 +290,7 @@ export default function CreateInterviewPage() {
       setErrorMessage("Please select or add a candidate.");
       return;
     }
-    if (currentStep === 3 && selectedPanelistIds.length === 0) {
-      setErrorMessage("Please select or add at least one panelist.");
-      return;
-    }
+    // Panelists are optional — with none selected, you become the interviewer.
     setCurrentStep((prev) => Math.min(prev + 1, 4));
   };
 
@@ -695,9 +692,11 @@ export default function CreateInterviewPage() {
         <Card className="p-6 border-slate-200 shadow-enterprise space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold text-slate-900">Step 3: Panelists</h3>
+              <h3 className="text-lg font-bold text-slate-900">Step 3: Panelists (optional)</h3>
               <p className="text-xs text-slate-500 mt-1">
-                Select one or more interviewers, or provision new ones.
+                Select interviewers, or leave this empty — with none selected,
+                you are recorded as the interviewer and your connected Google
+                Calendar is used.
               </p>
             </div>
             {!showNewPanelistForm && (
@@ -895,17 +894,24 @@ export default function CreateInterviewPage() {
                 Assigned Interview Panel ({selectedPanelistsList.length})
               </span>
               <div className="flex flex-wrap gap-2">
-                {selectedPanelistsList.map((p) => (
-                  <span
-                    key={p.id}
-                    className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-800 px-3 py-1 rounded-md font-medium"
-                  >
-                    {p.name} ({p.timezone})
-                    {newlyProvisionedIds.has(p.id) && (
-                      <Sparkles className="w-3 h-3 text-workday-blue" />
-                    )}
+                {selectedPanelistsList.length === 0 ? (
+                  <span className="text-slate-600">
+                    None selected — you will be the interviewer (your connected
+                    Google Calendar is used).
                   </span>
-                ))}
+                ) : (
+                  selectedPanelistsList.map((p) => (
+                    <span
+                      key={p.id}
+                      className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-800 px-3 py-1 rounded-md font-medium"
+                    >
+                      {p.name} ({p.timezone})
+                      {newlyProvisionedIds.has(p.id) && (
+                        <Sparkles className="w-3 h-3 text-workday-blue" />
+                      )}
+                    </span>
+                  ))
+                )}
               </div>
             </div>
           </div>

@@ -304,3 +304,81 @@ def test_slots_stay_within_7am_10pm_interviewer_local_time(
         end_h = e_local.hour + e_local.minute / 60
         assert start_h >= 7, f"{s_local} starts before 07:00 local"
         assert end_h <= 22, f"{e_local} ends after 22:00 local"
+
+
+# -------------------------------------- zero panelists: admin is the interviewer ---
+
+
+def test_recommendations_run_with_zero_panelists_using_admin_calendar(
+    client, make_user, make_calendar_connection, fake_calendar
+):
+    """Creating an interview with no panelists records the admin as the
+    interviewer; recommendations then read the admin's connected calendar."""
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    rid = client.post(
+        f"{V1}/interviews",
+        json={
+            "candidate_id": str(candidate.id),
+            "round_type": "TECHNICAL",
+            "duration_minutes": 60,
+            "panelist_ids": [],
+        },
+        headers=admin.headers,
+    ).json()["id"]
+
+    start = (datetime.now(UTC) + timedelta(days=2)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    end = start + timedelta(hours=8)
+    assert client.post(
+        f"{V1}/interviews/{rid}/candidate-availability",
+        json={
+            "timezone": "UTC",
+            "windows": [{"start_time": start.isoformat(), "end_time": end.isoformat()}],
+        },
+        headers=candidate.headers,
+    ).status_code == 201
+
+    # The admin (as the interviewer) must have a connected calendar in real mode.
+    make_calendar_connection(admin.id)
+    fake_calendar.free_busy_result = []
+
+    resp = client.post(f"{V1}/interviews/{rid}/recommendations", headers=admin.headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["slots"], "expected at least one common slot"
+
+
+def test_recommendations_zero_panelists_without_admin_calendar_is_honest_424(
+    client, make_user, fake_calendar
+):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    rid = client.post(
+        f"{V1}/interviews",
+        json={
+            "candidate_id": str(candidate.id),
+            "round_type": "TECHNICAL",
+            "duration_minutes": 60,
+            "panelist_ids": [],
+        },
+        headers=admin.headers,
+    ).json()["id"]
+    start = (datetime.now(UTC) + timedelta(days=2)).replace(
+        hour=8, minute=0, second=0, microsecond=0
+    )
+    assert client.post(
+        f"{V1}/interviews/{rid}/candidate-availability",
+        json={
+            "timezone": "UTC",
+            "windows": [
+                {"start_time": start.isoformat(),
+                 "end_time": (start + timedelta(hours=8)).isoformat()}
+            ],
+        },
+        headers=candidate.headers,
+    ).status_code == 201
+
+    resp = client.post(f"{V1}/interviews/{rid}/recommendations", headers=admin.headers)
+    assert resp.status_code == 424
+    assert resp.json()["error"]["code"] == "PANELIST_CALENDAR_NOT_CONNECTED"
