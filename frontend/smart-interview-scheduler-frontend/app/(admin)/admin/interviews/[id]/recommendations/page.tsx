@@ -71,9 +71,27 @@ export default function AdminRecommendationsPage() {
       const inv = await interviewsApi.getById(interviewId);
       setInterview(inv);
 
-      // Check if already booked
-      if (inv.status === "BOOKED" && inv.event) {
+      // Already booked or completed — don't re-run the engine (the backend
+      // would 409). Show the booked-result screen from the stored data.
+      if (["BOOKED", "COMPLETED"].includes(inv.status) && inv.event) {
         setBookedEvent(inv.event);
+        if (inv.latest_recommendations?.length) {
+          setRecommendationRun({
+            recommendation_run_id: "existing",
+            slots: inv.latest_recommendations,
+          });
+          setSelectedSlot(inv.latest_recommendations[0]);
+        }
+        return;
+      }
+      // Terminal without a booking — nothing to recommend.
+      if (["CANCELLED", "FAILED"].includes(inv.status)) {
+        setErrorMsg(
+          inv.status === "CANCELLED"
+            ? "This interview request has been cancelled. There are no recommendations to show."
+            : "Scheduling previously failed for this request — no common availability was found. Re-open it from the interview page to adjust constraints or ask the candidate for more availability."
+        );
+        return;
       }
 
       const recs = await schedulingApi.getRecommendations(interviewId);
@@ -84,7 +102,7 @@ export default function AdminRecommendationsPage() {
     } catch (err: any) {
       if (err.code === "NOT_READY_FOR_SCHEDULING") {
         setErrorMsg(
-          "This interview isn't ready for scheduling yet. Make sure the candidate has submitted availability."
+          "This interview isn't ready for scheduling yet — the candidate needs to submit their availability first."
         );
       } else if (
         err.code === "PANELIST_CALENDAR_NOT_CONNECTED" ||
@@ -156,8 +174,10 @@ export default function AdminRecommendationsPage() {
     }
   };
 
-  // BOOKING SUCCESS SCREEN (Sections 44 & 82)
-  if (bookedEvent && selectedSlot && interview) {
+  // BOOKING SUCCESS / BOOKED-RESULT SCREEN (Sections 44 & 82). selectedSlot is
+  // not required — a booked interview reached from a fresh page load has the
+  // event but may not have a recommendation run to select from.
+  if (bookedEvent && interview) {
     return (
       <div className="max-w-2xl mx-auto py-8">
         <Card className="p-8 sm:p-10 text-center space-y-6 shadow-enterprise-lg border-emerald-200 bg-white">
