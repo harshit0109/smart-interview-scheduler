@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
   title,
   breadcrumbs = [],
 }) => {
-  const { user, role, calendarStatus, logout } = useAuth();
+  const { user, role, calendarStatus, calendarMode, logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
 
   return (
@@ -91,9 +91,11 @@ export const Header: React.FC<HeaderProps> = ({
                 ? "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
                 : calendarStatus === "REVOKED" || calendarStatus === "EXPIRED"
                 ? "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                : calendarMode === "SIMULATED"
+                ? "bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100"
                 : "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200"
             )}
-            title="Google Calendar Integration Status"
+            title="Google Calendar integration status"
           >
             {calendarStatus === "CONNECTED" ? (
               <>
@@ -106,6 +108,12 @@ export const Header: React.FC<HeaderProps> = ({
                 <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
                 <span className="hidden lg:inline">Calendar:</span>
                 <span>Needs Attention</span>
+              </>
+            ) : calendarMode === "SIMULATED" ? (
+              <>
+                <CalendarX2 className="w-3.5 h-3.5 text-sky-600" />
+                <span className="hidden lg:inline">Calendar:</span>
+                <span>Dev mode (simulated)</span>
               </>
             ) : (
               <>

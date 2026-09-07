@@ -24,6 +24,7 @@ import {
   AuditEntry,
   RecordOutcomePayload,
   NextRoundPayload,
+  NotificationLogEntry,
 } from "./types";
 
 const API_BASE_URL =
@@ -999,6 +1000,16 @@ export const interviewsApi = {
       loadDirectory(),
     ]);
     return adaptInterview(raw, dir);
+  },
+
+  // GET /interviews/{id}/notifications  — ADMIN; confirmation/reminder/lifecycle emails.
+  async getNotifications(id: string): Promise<NotificationLogEntry[]> {
+    return request<NotificationLogEntry[]>(`/interviews/${id}/notifications`);
+  },
+
+  // POST /interviews/{id}/send-reminder  — ADMIN; demo-friendly reminder trigger.
+  async sendReminder(id: string): Promise<{ delivery_status: string; to: string; cc: string[] }> {
+    return request(`/interviews/${id}/send-reminder`, { method: "POST" });
   },
 };
 

@@ -97,12 +97,18 @@ export default function CandidateInterviewDetailPage() {
         <InterviewTimeline status={interview.status} />
       </Card>
 
-      {/* If Booked (Section 48): Candidate Booked View */}
-      {interview.status === "BOOKED" && interview.event && (
+      {/* Booked / completed: keep the scheduled slot + link visible as history */}
+      {interview.event &&
+        ["BOOKED", "COMPLETED"].includes(interview.status) &&
+        interview.event.status === "CONFIRMED" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-6 space-y-4">
           <div className="flex items-center gap-2 text-emerald-900 font-bold text-base">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span>Your Interview is Scheduled!</span>
+            <span>
+              {interview.status === "COMPLETED"
+                ? "Your interview (completed)"
+                : "Your Interview is Scheduled!"}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-700 pt-2 border-t border-emerald-200/60">

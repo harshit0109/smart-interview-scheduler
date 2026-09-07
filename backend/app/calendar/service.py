@@ -91,11 +91,21 @@ async def complete_callback(
     logger.info("calendar.connected user_id=%s", user_id)
 
 
+def _mode() -> str:
+    if settings.google_calendar_configured:
+        return "GOOGLE"
+    return "SIMULATED" if settings.calendar_simulated else "NOT_CONFIGURED"
+
+
 async def get_status(db: AsyncSession, user: User) -> schemas.CalendarStatusResponse:
     conn = await repository.get_by_user(db, user.id)
     if conn is None:
-        return schemas.CalendarStatusResponse(status="DISCONNECTED", last_synced_at=None)
-    return schemas.CalendarStatusResponse(status=conn.status, last_synced_at=conn.last_synced_at)
+        return schemas.CalendarStatusResponse(
+            status="DISCONNECTED", last_synced_at=None, mode=_mode()
+        )
+    return schemas.CalendarStatusResponse(
+        status=conn.status, last_synced_at=conn.last_synced_at, mode=_mode()
+    )
 
 
 # ------------------------------------------------------- usability / refresh ----

@@ -11,6 +11,7 @@ from app.core.db import get_db
 from app.core.deps import CurrentUser, admin_or_owning_candidate, require_role
 from app.core.pagination import Page, PageParams, page_params
 from app.interviews import lifecycle, schemas, service
+from app.notifications import repository as notifications_repository
 from app.notifications.client import SendGridClient, get_sendgrid_client
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
@@ -162,3 +163,43 @@ async def create_interview_next_round(
     db: DbDep,
 ) -> schemas.InterviewRequestOut:
     return await lifecycle.create_next_round(db, user, request_id, data)
+
+
+@router.post(
+    "/{request_id}/send-reminder",
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def send_interview_reminder(
+    request_id: uuid.UUID,
+    user: CurrentUser,
+    db: DbDep,
+    sendgrid: SendGridDep,
+) -> dict:
+    """Demo-friendly: send the REMINDER notification for this booked interview
+    right now, without waiting for scripts/send_reminders.py's time window.
+    SENT if SendGrid is configured, else SIMULATED (body logged)."""
+    return await lifecycle.send_reminder_now(db, request_id, sendgrid=sendgrid)
+
+
+@router.get(
+    "/{request_id}/notifications",
+    response_model=list[schemas.NotificationLogOut],
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def list_interview_notifications(
+    request_id: uuid.UUID, user: CurrentUser, db: DbDep
+) -> list[schemas.NotificationLogOut]:
+    """Confirmation / reminder / lifecycle email records for this interview
+    (SENT / SIMULATED / FAILED), newest first."""
+    rows = await notifications_repository.list_for_request(db, request_id)
+    return [
+        schemas.NotificationLogOut(
+            id=r.id,
+            notification_type=r.notification_type,
+            channel=r.channel,
+            recipient=r.recipient,
+            status=r.status,
+            sent_at=r.sent_at,
+        )
+        for r in rows
+    ]

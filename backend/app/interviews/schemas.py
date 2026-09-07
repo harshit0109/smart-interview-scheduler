@@ -120,3 +120,12 @@ class AuditEntryOut(BaseModel):
     entity_id: uuid.UUID
     metadata: dict
     created_at: datetime
+
+
+class NotificationLogOut(BaseModel):
+    id: uuid.UUID
+    notification_type: str  # CONFIRMATION | REMINDER | DECLINE | CANCELLATION | RESCHEDULE
+    channel: str
+    recipient: str
+    status: str  # SENT | SIMULATED | FAILED
+    sent_at: datetime

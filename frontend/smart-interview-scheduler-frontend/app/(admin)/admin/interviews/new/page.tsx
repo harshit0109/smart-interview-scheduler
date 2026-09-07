@@ -347,16 +347,21 @@ export default function CreateInterviewPage() {
           <h2 className="text-2xl font-bold text-slate-900">
             {createdInterview.title || `Interview Request #${createdInterview.id}`}
           </h2>
+          {createdInterview.company && (
+            <p className="text-xs font-medium text-slate-600">{createdInterview.company}</p>
+          )}
           <p className="text-sm text-slate-600 max-w-md mx-auto">
             The interview request has been created
             {anyoneProvisionedThisSession
               ? ", and the new candidate/panelist accounts were provisioned"
               : ""}
-            . Next, share the availability link with{" "}
-            <strong>{createdInterview.candidate_name}</strong> to receive their preferred windows.
+            . Next step: open the interview and{" "}
+            <strong>Send Invitations</strong> so {createdInterview.candidate_name} and the
+            panel each get a personal link.
           </p>
           <p className="text-[11px] text-slate-400 max-w-md mx-auto">
-            No invitations have been sent yet — invitation delivery is not part of this release.
+            No invitations have been sent yet — sending them is a separate action on the
+            interview detail page.
           </p>
         </div>
 
@@ -386,7 +391,7 @@ export default function CreateInterviewPage() {
           </Link>
           <Link href={`/admin/interviews/${createdInterview.id}`}>
             <Button variant="primary" size="md" className="gap-2">
-              <span>View Request Details</span>
+              <span>Open interview &amp; send invitations</span>
               <ArrowRight className="w-4 h-4" />
             </Button>
           </Link>

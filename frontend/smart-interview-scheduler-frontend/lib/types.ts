@@ -39,9 +39,13 @@ export interface AuthTokens {
   };
 }
 
+export type CalendarMode = "GOOGLE" | "SIMULATED" | "NOT_CONFIGURED";
+
 export interface CalendarStatusResponse {
   status: CalendarStatus;
   last_synced_at: string | null;
+  /** How bookings actually create events. */
+  mode?: CalendarMode;
   panelist_name?: string;
 }
 
@@ -164,6 +168,16 @@ export interface NextRoundPayload {
   panelist_ids: string[];
   title?: string;
   company?: string;
+}
+
+/** One row of GET /interviews/{id}/notifications (ADMIN). */
+export interface NotificationLogEntry {
+  id: string;
+  notification_type: "CONFIRMATION" | "REMINDER" | "DECLINE" | "CANCELLATION" | "RESCHEDULE";
+  channel: string;
+  recipient: string;
+  status: "SENT" | "SIMULATED" | "FAILED";
+  sent_at: string;
 }
 
 /** One row of GET /interviews/{id}/audit (ADMIN). */

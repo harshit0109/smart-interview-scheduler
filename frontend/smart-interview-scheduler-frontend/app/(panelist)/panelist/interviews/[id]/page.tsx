@@ -98,12 +98,18 @@ export default function PanelistInterviewDetailPage() {
         <InterviewTimeline status={interview.status} />
       </Card>
 
-      {/* Confirmed meeting card if booked */}
-      {interview.status === "BOOKED" && interview.event && (
+      {/* Booked / completed: keep the scheduled slot + link visible as history */}
+      {interview.event &&
+        ["BOOKED", "COMPLETED"].includes(interview.status) &&
+        interview.event.status === "CONFIRMED" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-6 space-y-4">
           <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            <span>Interview Confirmed & Synchronized</span>
+            <span>
+              {interview.status === "COMPLETED"
+                ? "Interview (completed)"
+                : "Interview Confirmed"}
+            </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs text-slate-700">

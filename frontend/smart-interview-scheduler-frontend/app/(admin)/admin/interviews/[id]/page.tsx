@@ -10,6 +10,7 @@ import {
   InvitationSummary,
   ParticipantResponseStatus,
   AuditEntry,
+  NotificationLogEntry,
 } from "@/lib/types";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -54,6 +55,38 @@ export default function AdminInterviewDetailPage() {
   const [audit, setAudit] = React.useState<AuditEntry[] | null>(null);
   const [auditOpen, setAuditOpen] = React.useState(false);
 
+  const [notifications, setNotifications] = React.useState<NotificationLogEntry[]>([]);
+  const [reminderBusy, setReminderBusy] = React.useState(false);
+  const [reminderMsg, setReminderMsg] = React.useState<string | null>(null);
+
+  const loadNotifications = React.useCallback(async () => {
+    try {
+      setNotifications(await interviewsApi.getNotifications(id));
+    } catch {
+      setNotifications([]);
+    }
+  }, [id]);
+
+  const handleSendReminder = async () => {
+    setReminderBusy(true);
+    setReminderMsg(null);
+    try {
+      const r = await interviewsApi.sendReminder(id);
+      setReminderMsg(
+        r.delivery_status === "SENT"
+          ? `Reminder email sent to ${r.to}.`
+          : `Reminder ${r.delivery_status.toLowerCase()} (no email service configured) — recipient ${r.to}. Full body written to the backend log.`
+      );
+      await loadNotifications();
+    } catch (err) {
+      setReminderMsg(
+        err instanceof ApiClientError ? err.message : "Could not send the reminder."
+      );
+    } finally {
+      setReminderBusy(false);
+    }
+  };
+
   const loadInvitations = React.useCallback(async () => {
     try {
       const rows = await invitationsApi.list(id);
@@ -88,7 +121,8 @@ export default function AdminInterviewDetailPage() {
   React.useEffect(() => {
     loadInterview();
     loadInvitations();
-  }, [loadInterview, loadInvitations]);
+    loadNotifications();
+  }, [loadInterview, loadInvitations, loadNotifications]);
 
   const handleSendInvitations = async () => {
     setIsIssuing(true);
@@ -216,14 +250,18 @@ export default function AdminInterviewDetailPage() {
         <InterviewTimeline status={interview.status} />
       </Card>
 
-      {/* CONFIRMED BOOKING HERO (Sections 44 & 47) */}
-      {interview.status === "BOOKED" && interview.event && (
+      {/* Booked / completed: the confirmed slot + link stay visible as history */}
+      {interview.event &&
+        ["BOOKED", "COMPLETED"].includes(interview.status) &&
+        interview.event.status === "CONFIRMED" && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-6 space-y-4 shadow-sm">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-emerald-900 font-bold text-base">
               <CheckCircle2 className="w-6 h-6 text-emerald-600" />
               <span>
-                {interview.event.provider === "SIMULATED"
+                {interview.status === "COMPLETED"
+                  ? "Scheduled interview (completed)"
+                  : interview.event.provider === "SIMULATED"
                   ? "Interview Booked (development mode)"
                   : "Interview Booked & Google Calendar Confirmed"}
               </span>
@@ -446,6 +484,74 @@ export default function AdminInterviewDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Email notifications (confirmation / reminder / lifecycle) */}
+      {interview.event && (
+        <Card className="border-slate-200 shadow-xs">
+          <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm">Email notifications</CardTitle>
+              <CardDescription className="text-xs">
+                Confirmation, reminder and lifecycle emails for this interview.
+                {" "}
+                {notifications.some((n) => n.status === "SIMULATED")
+                  ? "SIMULATED = no email service is configured; the full message is written to the backend log, nothing was actually delivered."
+                  : "SENT = delivered via the email provider."}
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleSendReminder}
+              isLoading={reminderBusy}
+              className="shrink-0"
+            >
+              Send reminder now
+            </Button>
+          </CardHeader>
+          <CardContent>
+            {reminderMsg && (
+              <div className="mb-3 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-sky-600 shrink-0" />
+                <span>{reminderMsg}</span>
+              </div>
+            )}
+            {notifications.length === 0 ? (
+              <p className="text-xs text-slate-400 py-1">
+                No emails yet. A confirmation is written when a slot is booked; use
+                &ldquo;Send reminder now&rdquo; to preview the reminder.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {notifications.map((n) => (
+                  <div key={n.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900">
+                        {n.notification_type.replace(/_/g, " ")}
+                      </span>
+                      <span className="text-slate-500"> → {n.recipient}</span>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {formatDateTime(n.sent_at, user?.timezone)}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={
+                        n.status === "SENT"
+                          ? "success"
+                          : n.status === "SIMULATED"
+                          ? "outline"
+                          : "danger"
+                      }
+                    >
+                      {n.status === "SIMULATED" ? "Simulated (no email service)" : n.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Lifecycle actions — cancel any non-terminal request, reschedule a booked one */}
       <LifecycleActions

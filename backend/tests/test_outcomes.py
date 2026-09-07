@@ -287,3 +287,43 @@ def test_archive_rejects_non_candidate(client, make_user):
     panelist = make_user("PANELIST")
     r = client.post(f"{V1}/users/{panelist.id}/archive", headers=admin.headers)
     assert r.status_code == 422
+
+
+# ------------------------------------------- reminder-now + notification list ---
+
+
+def test_send_reminder_now_and_notifications_list(client, make_user, dev_mode, db_val):
+    admin, _c, _p, rid = _book_dev(client, make_user, dev_mode)
+
+    r = client.post(f"{V1}/interviews/{rid}/send-reminder", headers=admin.headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["delivery_status"] in {"SIMULATED", "SENT"}
+
+    logs = client.get(f"{V1}/interviews/{rid}/notifications", headers=admin.headers)
+    assert logs.status_code == 200
+    types = {row["notification_type"] for row in logs.json()}
+    assert "CONFIRMATION" in types  # written at book time
+    assert "REMINDER" in types  # just triggered
+    for row in logs.json():
+        assert row["status"] in {"SENT", "SIMULATED", "FAILED"}
+
+
+def test_send_reminder_requires_booked(client, make_user, dev_mode):
+    admin, _c, _p, rid, _slots = _recommended_dev(client, make_user)  # not booked
+    r = client.post(f"{V1}/interviews/{rid}/send-reminder", headers=admin.headers)
+    assert r.status_code == 409
+
+
+def test_notifications_list_admin_only(client, make_user, dev_mode):
+    admin, candidate, panelists, rid = _book_dev(client, make_user, dev_mode)
+    for actor in (candidate, panelists[0]):
+        assert client.get(
+            f"{V1}/interviews/{rid}/notifications", headers=actor.headers
+        ).status_code == 403
+
+
+def test_calendar_status_reports_simulated_mode(client, make_user, dev_mode):
+    admin = make_user("ADMIN")
+    r = client.get(f"{V1}/calendar/status", headers=admin.headers)
+    assert r.status_code == 200
+    assert r.json()["mode"] == "SIMULATED"

@@ -7,7 +7,7 @@ import React, {
   useState,
   useCallback,
 } from "react";
-import { User, Role, CalendarStatus } from "./types";
+import { User, Role, CalendarStatus, CalendarMode } from "./types";
 import {
   authApi,
   usersApi,
@@ -24,6 +24,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   calendarStatus: CalendarStatus;
+  calendarMode: CalendarMode;
   login: (email: string, password: string) => Promise<User>;
   register: (data: {
     email: string;
@@ -66,6 +67,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [calendarStatus, setCalendarStatus] =
     useState<CalendarStatus>("DISCONNECTED");
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>("GOOGLE");
 
   const applyUser = useCallback((next: User | null) => {
     setUser(next);
@@ -76,6 +78,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const res = await calendarApi.getStatus();
       setCalendarStatus(res.status);
+      setCalendarMode(res.mode ?? "GOOGLE");
     } catch {
       setCalendarStatus("DISCONNECTED");
     }
@@ -202,6 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         isAuthenticated: !!user,
         isLoading,
         calendarStatus,
+        calendarMode,
         login,
         register,
         bootstrapAdmin,

@@ -418,3 +418,43 @@ async def create_next_round(
     from app.interviews import service as interviews_service
 
     return interviews_service._to_out(await repository.get(db, child.id))
+
+
+# ------------------------------------------------------------ reminder (demo) ---
+
+
+async def send_reminder_now(
+    db: AsyncSession,
+    request_id: uuid.UUID,
+    *,
+    sendgrid: SendGridClient,
+) -> dict:
+    """ADMIN-triggered reminder for a booked interview — the demo-friendly way to
+    exercise the reminder path without waiting for the cron window. Writes one
+    REMINDER `notification_logs` row (SENT if SendGrid is configured, otherwise
+    SIMULATED with the full body logged). The cron script's idempotency then
+    skips this event, so it is not double-sent."""
+    request = await _load(db, request_id)
+    event = await booking_repository.get_confirmed_event(db, request_id)
+    if event is None:
+        raise NotBookedError()
+    parts = await booking_repository.participants_with_users(db, request_id)
+    candidate_email, panelist_emails = _emails(parts)
+    status = await notifications_service.send_lifecycle_notification(
+        db,
+        event,
+        notification_type="REMINDER",
+        candidate_email=candidate_email,
+        panelist_emails=panelist_emails,
+        reason=None,
+        client=sendgrid,
+        title=request.title,
+        company=request.company,
+        round_type=request.round_type,
+    )
+    logger.info("lifecycle.reminder_now request_id=%s status=%s", request_id, status)
+    return {
+        "delivery_status": status,
+        "to": candidate_email,
+        "cc": panelist_emails,
+    }
