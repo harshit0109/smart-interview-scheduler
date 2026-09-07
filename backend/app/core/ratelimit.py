@@ -71,10 +71,11 @@ _RULES: list[tuple[str, re.Pattern[str], str, str]] = [
      "rate_limit_strict_per_minute"),
     ("POST", re.compile(r"/interviews/[^/]+/candidate-availability"), "strict",
      "rate_limit_strict_per_minute"),
-    ("GET", re.compile(r"/interviews/[^/]+/availability"), "strict",
-     "rate_limit_strict_per_minute"),
-    ("GET", re.compile(r"/interviews/[^/]+"), "strict", "rate_limit_strict_per_minute"),
-    ("GET", re.compile(r"/interviews"), "strict", "rate_limit_strict_per_minute"),
+    # GET reads of interviews / a single interview / its availability do no
+    # downstream amplification (no Google, no email) and are hit repeatedly by
+    # normal dashboard navigation, so for an authenticated caller they fall
+    # through to STANDARD (60/min). Unauthenticated callers still land on STRICT
+    # via the default in _rule_for.
 ]
 
 

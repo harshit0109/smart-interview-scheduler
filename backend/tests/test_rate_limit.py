@@ -54,14 +54,18 @@ def test_ip_identity_separation(client, rate_limited):
     assert client.post(f"{V1}/auth/login", json=BAD_LOGIN, headers=hdr_b).status_code == 401
 
 
+# POST /interviews/{id}/candidate-availability is an auth-keyed STRICT endpoint;
+# the id need not exist (the rate-limit middleware runs before routing).
+_STRICT = f"{V1}/interviews/{uuid.uuid4()}/candidate-availability"
+
+
 def test_user_identity_separation(client, make_user, rate_limited):
     a = make_user("CANDIDATE")
     b = make_user("CANDIDATE")
-    # /interviews (list) is a candidate-facing STRICT endpoint keyed by user id.
     for _ in range(10):
-        client.get(f"{V1}/interviews", headers=a.headers)
-    assert client.get(f"{V1}/interviews", headers=a.headers).status_code == 429
-    assert client.get(f"{V1}/interviews", headers=b.headers).status_code == 200
+        client.post(_STRICT, json={}, headers=a.headers)
+    assert client.post(_STRICT, json={}, headers=a.headers).status_code == 429
+    assert client.post(_STRICT, json={}, headers=b.headers).status_code != 429
 
 
 def test_authenticated_uses_user_bucket_not_ip(client, make_user, rate_limited):
@@ -69,8 +73,8 @@ def test_authenticated_uses_user_bucket_not_ip(client, make_user, rate_limited):
     a = make_user("ADMIN")
     b = make_user("ADMIN")
     for _ in range(10):
-        client.get(f"{V1}/interviews", headers=a.headers)
-    assert client.get(f"{V1}/interviews", headers=b.headers).status_code == 200
+        client.post(_STRICT, json={}, headers=a.headers)
+    assert client.post(_STRICT, json={}, headers=b.headers).status_code != 429
 
 
 # -------------------------------------------------------------- tier limits ---
@@ -78,12 +82,15 @@ def test_authenticated_uses_user_bucket_not_ip(client, make_user, rate_limited):
 
 def test_standard_tier_allows_more_than_strict(client, make_user, rate_limited):
     admin = make_user("ADMIN")
-    # STANDARD (60/min): /users/me survives well past the strict ceiling.
+    # STANDARD (60/min): /users/me and /interviews survive past the strict ceiling.
     for _ in range(15):
         assert client.get(f"{V1}/users/me", headers=admin.headers).status_code == 200
-    # STRICT (10/min): a candidate-facing endpoint on the same token 429s at 11.
-    codes = [client.get(f"{V1}/interviews", headers=admin.headers).status_code for _ in range(11)]
-    assert codes[:10] == [200] * 10
+    assert client.get(f"{V1}/interviews", headers=admin.headers).status_code == 200
+    # STRICT (10/min): an auth-keyed strict endpoint on the same token 429s at 11.
+    codes = [
+        client.post(_STRICT, json={}, headers=admin.headers).status_code for _ in range(11)
+    ]
+    assert codes[:10] != [429] * 10  # first 10 not rate-limited
     assert codes[10] == 429
 
 
