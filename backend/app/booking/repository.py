@@ -1,8 +1,9 @@
 """Direct DB access for interview_events / reconciliation_tasks (owned here)."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +58,47 @@ async def participants_with_users(
         .where(InterviewParticipant.interview_request_id == interview_request_id)
     )
     return list(rows.all())
+
+
+async def confirmed_events_for_users(
+    db: AsyncSession,
+    user_ids: list[uuid.UUID],
+    *,
+    exclude_request_id: uuid.UUID,
+    overlaps_start: datetime | None = None,
+    overlaps_end: datetime | None = None,
+) -> list[tuple[uuid.UUID, datetime, datetime]]:
+    """`(user_id, start, end)` for every CONFIRMED interview_event whose request
+    has one of `user_ids` as a participant, excluding `exclude_request_id`.
+
+    Used both to feed the scheduler each panelist's real internal commitments and
+    to guard booking against double-booking a shared participant. When
+    `overlaps_start`/`overlaps_end` are given, only rows that time-overlap that
+    window are returned (half-open: `start < window_end AND window_start < end`).
+    """
+    if not user_ids:
+        return []
+    stmt = (
+        select(InterviewParticipant.user_id, InterviewEvent.start_time, InterviewEvent.end_time)
+        .join(
+            InterviewEvent,
+            InterviewEvent.interview_request_id == InterviewParticipant.interview_request_id,
+        )
+        .where(
+            InterviewParticipant.user_id.in_(user_ids),
+            InterviewParticipant.interview_request_id != exclude_request_id,
+            InterviewEvent.status == "CONFIRMED",
+        )
+    )
+    if overlaps_start is not None and overlaps_end is not None:
+        stmt = stmt.where(
+            and_(
+                InterviewEvent.start_time < overlaps_end,
+                overlaps_start < InterviewEvent.end_time,
+            )
+        )
+    rows = await db.execute(stmt)
+    return [(uid, s, e) for uid, s, e in rows.all()]
 
 
 async def insert_interview_event(

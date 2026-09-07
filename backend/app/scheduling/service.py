@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.availability import repository as availability_repository
+from app.booking import repository as booking_repository
 from app.calendar import repository as calendar_repository
 from app.calendar import service as calendar_service
 from app.calendar.client import GoogleCalendarClient
@@ -157,6 +158,19 @@ async def generate(
             busy_by_user[user.id] = await calendar_service.get_free_busy(
                 conns[user.id], time_min, time_max, client
             )
+
+    # Internal commitments: a panelist already CONFIRMED on another interview in
+    # this system is busy then, whether or not Google free/busy shows it (it
+    # never does in simulated mode, and in real mode only the organiser's own
+    # calendar carries the event). Fed as hard `busy` intervals so the engine
+    # will not recommend an overlapping slot.
+    panelist_ids = [user.id for _p, user in panelists]
+    internal = await booking_repository.confirmed_events_for_users(
+        db, panelist_ids, exclude_request_id=request_id,
+        overlaps_start=time_min, overlaps_end=time_max,
+    )
+    for uid, s, e in internal:
+        busy_by_user.setdefault(uid, []).append(TimeInterval(s, e))
 
     engine_input = EngineInput(
         reference_time=ref,

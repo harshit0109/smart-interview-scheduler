@@ -327,3 +327,96 @@ def test_calendar_status_reports_simulated_mode(client, make_user, dev_mode):
     r = client.get(f"{V1}/calendar/status", headers=admin.headers)
     assert r.status_code == 200
     assert r.json()["mode"] == "SIMULATED"
+
+
+# ------------------------------------------ cross-interview panelist conflict ---
+
+
+def _request_with_shared_panelist(client, admin, candidate, panelist, *, days_out=2):
+    """Create -> availability -> recommendations for one request that uses a
+    caller-supplied panelist, so two requests can share the same interviewer."""
+    rid = client.post(
+        f"{V1}/interviews",
+        json={
+            "candidate_id": str(candidate.id),
+            "title": "Staff Engineer",
+            "company": "Globex",
+            "round_type": "TECHNICAL",
+            "duration_minutes": 60,
+            "panelist_ids": [str(panelist.id)],
+        },
+        headers=admin.headers,
+    ).json()["id"]
+    start = (datetime.now(UTC) + timedelta(days=days_out)).replace(
+        hour=12, minute=0, second=0, microsecond=0
+    )
+    end = start + timedelta(hours=6)
+    assert client.post(
+        f"{V1}/interviews/{rid}/candidate-availability",
+        json={
+            "timezone": "UTC",
+            "windows": [{"start_time": start.isoformat(), "end_time": end.isoformat()}],
+        },
+        headers=candidate.headers,
+    ).status_code == 201
+    rec = client.post(f"{V1}/interviews/{rid}/recommendations", headers=admin.headers)
+    assert rec.status_code == 200, rec.text
+    return rid, rec.json()["slots"]
+
+
+def test_shared_panelist_cannot_be_double_booked_across_interviews(
+    client, make_user, dev_mode, db_val
+):
+    admin = make_user("ADMIN")
+    panelist = make_user("PANELIST")
+    cand_a = make_user("CANDIDATE")
+    cand_b = make_user("CANDIDATE")
+
+    rid_a, slots_a = _request_with_shared_panelist(client, admin, cand_a, panelist)
+    rid_b, slots_b = _request_with_shared_panelist(client, admin, cand_b, panelist)
+
+    booked = client.post(
+        f"{V1}/interviews/{rid_a}/book",
+        json={"recommended_slot_id": slots_a[0]["id"]},
+        headers=admin.headers,
+    )
+    assert booked.status_code == 201, booked.text
+    booked_start = booked.json()["start_time"]
+
+    # B's stale recommendation set still holds the now-conflicting slot.
+    clashing = next(s for s in slots_b if s["start_time"] == booked_start)
+    resp = client.post(
+        f"{V1}/interviews/{rid_b}/book",
+        json={"recommended_slot_id": clashing["id"]},
+        headers=admin.headers,
+    )
+    assert resp.status_code == 409, resp.text
+    assert "another interview" in resp.json()["error"]["message"]
+    assert db_val(
+        "SELECT count(*) FROM interview_events WHERE interview_request_id = :r", {"r": rid_b}
+    ) == 0
+
+
+def test_recommendations_exclude_slots_conflicting_with_a_booked_interview(
+    client, make_user, dev_mode
+):
+    admin = make_user("ADMIN")
+    panelist = make_user("PANELIST")
+    cand_a = make_user("CANDIDATE")
+    cand_b = make_user("CANDIDATE")
+
+    rid_a, slots_a = _request_with_shared_panelist(client, admin, cand_a, panelist)
+    booked = client.post(
+        f"{V1}/interviews/{rid_a}/book",
+        json={"recommended_slot_id": slots_a[0]["id"]},
+        headers=admin.headers,
+    )
+    assert booked.status_code == 201
+    booked_start = booked.json()["start_time"]
+    booked_end = booked.json()["end_time"]
+
+    rid_b, slots_b = _request_with_shared_panelist(client, admin, cand_b, panelist)
+    # No recommended slot for B may overlap the interval already booked for the
+    # shared panelist on request A.
+    for s in slots_b:
+        assert not (s["start_time"] < booked_end and booked_start < s["end_time"]), s

@@ -101,6 +101,27 @@ async def book(
             parts = await repository.participants_with_users(db, request_id)
             panelists = [(p, u) for p, u in parts if p.role_in_interview == "PANELIST"]
             candidate = next(u for p, u in parts if p.role_in_interview == "CANDIDATE")
+
+            # Cross-interview conflict guard (requirements.md §10): no participant —
+            # candidate or panelist — may already be CONFIRMED on another interview
+            # that overlaps this slot. The per-request unique index does not catch
+            # this; the check runs under the booking lock, just before the Google
+            # call, so a slot that became conflicting since recommendation is
+            # rejected cleanly.
+            # ponytail: check-under-lock, not a DB exclusion constraint — a truly
+            # simultaneous book of two different requests sharing a panelist could
+            # still race; add a btree_gist exclusion constraint if that matters.
+            clashes = await repository.confirmed_events_for_users(
+                db,
+                [u.id for _p, u in parts],
+                exclude_request_id=request_id,
+                overlaps_start=slot.start_time,
+                overlaps_end=slot.end_time,
+            )
+            if clashes:
+                raise SlotNoLongerAvailableError(
+                    "a participant is already booked for another interview at this time"
+                )
             # Plain strings captured before step 6 — used for the post-commit
             # confirmation, safe against a rollback expiring the ORM rows.
             candidate_email = candidate.email
