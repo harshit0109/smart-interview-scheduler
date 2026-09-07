@@ -178,6 +178,30 @@ def test_list_visibility_per_role(client, make_user):
     assert [x["id"] for x in by_cand_b["items"]] == [r_b["id"]]
 
 
+def test_freshly_registered_candidate_sees_no_interviews(client, make_user):
+    """A brand-new self-registered account starts clean — none of the demo /
+    other-tenant interviews leak into its list or its detail reads."""
+    admin = make_user("ADMIN")
+    existing_cand = make_user("CANDIDATE")
+    other_rid = _create(client, admin, existing_cand, [make_user("PANELIST")]).json()["id"]
+
+    email = f"fresh-{uuid.uuid4().hex[:8]}@example.com"
+    reg = client.post(
+        f"{V1}/auth/register",
+        json={"name": "New Person", "email": email, "password": "password1", "timezone": "UTC"},
+    )
+    assert reg.status_code == 201, reg.text
+    assert reg.json()["role"] == "CANDIDATE"  # self-registration is candidate-only
+
+    login = client.post(f"{V1}/auth/login", json={"email": email, "password": "password1"})
+    assert login.status_code == 200, login.text
+    hdrs = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    listing = client.get(f"{V1}/interviews", headers=hdrs).json()
+    assert listing["items"] == [] and listing["total"] == 0
+    assert client.get(f"{V1}/interviews/{other_rid}", headers=hdrs).status_code == 404
+
+
 def test_list_pagination_and_status_filter(client, make_user):
     admin = make_user("ADMIN")
     candidate = make_user("CANDIDATE")
