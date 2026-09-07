@@ -234,6 +234,27 @@ def test_detail_visible_to_admin_and_participants_only(client, make_user):
     assert client.get(f"{V1}/interviews/{rid}", headers=outsider.headers).status_code == 404
 
 
+def test_detail_reports_panelist_calendar_status_to_admin(
+    client, make_user, make_calendar_connection
+):
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    connected_p = make_user("PANELIST")
+    unconnected_p = make_user("PANELIST")
+    make_calendar_connection(connected_p.id, status="CONNECTED")
+    rid = _create(client, admin, candidate, [connected_p, unconnected_p]).json()["id"]
+
+    parts = client.get(f"{V1}/interviews/{rid}", headers=admin.headers).json()["participants"]
+    by_id = {p["user_id"]: p for p in parts}
+    assert by_id[str(connected_p.id)]["calendar_status"] == "CONNECTED"
+    assert by_id[str(unconnected_p.id)]["calendar_status"] == "DISCONNECTED"
+    assert by_id[str(candidate.id)]["calendar_status"] is None  # candidates don't connect
+
+    # A non-admin participant never sees calendar status.
+    as_cand = client.get(f"{V1}/interviews/{rid}", headers=candidate.headers).json()
+    assert all(p["calendar_status"] is None for p in as_cand["participants"])
+
+
 def test_detail_unknown_id_404(client, make_user):
     admin = make_user("ADMIN")
     assert client.get(f"{V1}/interviews/{uuid.uuid4()}", headers=admin.headers).status_code == 404

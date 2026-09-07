@@ -20,6 +20,23 @@ async def get_by_user(
     )
 
 
+async def statuses_by_user(
+    db: AsyncSession, user_ids: list[uuid.UUID], provider: str = "GOOGLE"
+) -> dict[uuid.UUID, str]:
+    """`{user_id: status}` for every user in `user_ids` that has a connection
+    row. Users with no row are simply absent from the dict. One query — used to
+    show per-panelist calendar connection state on the interview detail."""
+    if not user_ids:
+        return {}
+    rows = await db.execute(
+        select(CalendarConnection.user_id, CalendarConnection.status).where(
+            CalendarConnection.user_id.in_(user_ids),
+            CalendarConnection.provider == provider,
+        )
+    )
+    return {uid: status for uid, status in rows.all()}
+
+
 async def upsert_connected(
     db: AsyncSession,
     *,

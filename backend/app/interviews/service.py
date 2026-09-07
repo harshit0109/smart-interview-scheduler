@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.booking import repository as booking_repository
 from app.booking.schemas import InterviewEventOut
+from app.calendar import repository as calendar_repository
 from app.core.audit import record_audit
 from app.core.errors import (
     InvalidParticipantError,
@@ -123,6 +124,16 @@ async def get_request(
     if request is None or not _visible_to(request, viewer):
         raise NotFoundError("interview request not found")
     out = _to_out(request)
+    # ADMIN only: show each panelist's Google Calendar connection state so the
+    # scheduler can see who still needs to connect before recommendations run.
+    if viewer.role == "ADMIN":
+        panelist_ids = [
+            p.user_id for p in request.participants if p.role_in_interview == "PANELIST"
+        ]
+        statuses = await calendar_repository.statuses_by_user(db, panelist_ids)
+        for p in out.participants:
+            if p.role_in_interview == "PANELIST":
+                p.calendar_status = statuses.get(p.user_id, "DISCONNECTED")
     # ADMIN and the owning candidate may see the recommended slots (requirements.md §4).
     if viewer.role == "ADMIN" or viewer.id == request.candidate_id:
         run = await scheduling_repository.get_latest_run(db, request_id)

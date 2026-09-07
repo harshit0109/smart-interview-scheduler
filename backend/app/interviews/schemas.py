@@ -49,6 +49,11 @@ class ParticipantOut(BaseModel):
     user_id: uuid.UUID
     role_in_interview: str
     response_status: str
+    # Google Calendar connection state for PANELIST participants, enriched on the
+    # detail read only (None on list reads and for the candidate). CONNECTED /
+    # EXPIRED / REVOKED / DISCONNECTED, or None when the panelist has no
+    # connection row at all.
+    calendar_status: str | None = None
 
 
 class InterviewRequestOut(BaseModel):
