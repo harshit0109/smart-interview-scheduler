@@ -50,6 +50,12 @@ services:
       CALENDAR_DEV_MODE: ${CALENDAR_DEV_MODE:-1}
       GOOGLE_CALENDAR_OAUTH_CLIENT_ID: ${GOOGLE_CALENDAR_OAUTH_CLIENT_ID:-}
       GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET: ${GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET:-}
+      # Only needed to override the localhost defaults. The redirect URI must
+      # match the Google OAuth client exactly; the encryption key must be a real
+      # Fernet key (not the "dev" sentinel) for real calendar token storage.
+      GOOGLE_CALENDAR_OAUTH_REDIRECT_URI: ${GOOGLE_CALENDAR_OAUTH_REDIRECT_URI:-http://localhost:8000/api/v1/calendar/callback}
+      CALENDAR_TOKEN_ENCRYPTION_KEY: ${CALENDAR_TOKEN_ENCRYPTION_KEY:-dev}
+      FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@smart-interview-scheduler.example}
       INTERVIEW_REMINDER_MINUTES_BEFORE: ${INTERVIEW_REMINDER_MINUTES_BEFORE:-15}
