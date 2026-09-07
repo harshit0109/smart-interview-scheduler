@@ -82,7 +82,9 @@ async def send_booking_confirmation(
     company: str | None = None,
 ) -> str:
     """Exactly one CONFIRMATION row per successful booking."""
-    link = event.meeting_link or "(a meeting link will follow separately)"
+    link = event.meeting_link or (
+        "(no video link — SIMULATED booking; Google Calendar not configured)"
+    )
     context = ""
     if company:
         context += f"Company: {company}\n"
