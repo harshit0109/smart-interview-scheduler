@@ -5,6 +5,7 @@ Google free/busy is the injected fake; the Phase 5 engine runs unmodified.
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from app.calendar.client import BusyInterval, CalendarTransportError
 
@@ -249,3 +250,57 @@ def test_detail_recommendations_visibility(
         f"{V1}/interviews/{ctx.rid}", headers=ctx.panelists[0].headers
     ).json()
     assert as_panelist["recommended_slots"] is None
+
+
+# ----------------------------------------- interviewer 7am-10pm LOCAL window ---
+
+
+def test_slots_stay_within_7am_10pm_interviewer_local_time(
+    client, make_user, make_calendar_connection, fake_calendar
+):
+    """A panelist in Asia/Kolkata: every recommended slot must fall entirely
+    inside 07:00-22:00 Kolkata local, whatever the (wide) candidate window is."""
+    admin = make_user("ADMIN")
+    candidate = make_user("CANDIDATE")
+    panelist = make_user("PANELIST", timezone="Asia/Kolkata")
+    rid = client.post(
+        f"{V1}/interviews",
+        json={
+            "candidate_id": str(candidate.id),
+            "round_type": "TECHNICAL",
+            "duration_minutes": 60,
+            "panelist_ids": [str(panelist.id)],
+        },
+        headers=admin.headers,
+    ).json()["id"]
+
+    # Candidate window spans a full 24h in UTC two days out — no constraint from
+    # the candidate side, so only the interviewer window can bound the slots.
+    start = (datetime.now(UTC) + timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    end = start + timedelta(hours=24)
+    assert client.post(
+        f"{V1}/interviews/{rid}/candidate-availability",
+        json={
+            "timezone": "UTC",
+            "windows": [{"start_time": start.isoformat(), "end_time": end.isoformat()}],
+        },
+        headers=candidate.headers,
+    ).status_code == 201
+    make_calendar_connection(panelist.id)
+    fake_calendar.free_busy_result = []
+
+    resp = client.post(f"{V1}/interviews/{rid}/recommendations", headers=admin.headers)
+    assert resp.status_code == 200, resp.text
+    slots = resp.json()["slots"]
+    assert slots, "expected at least one slot inside the 7am-10pm local window"
+
+    kolkata = ZoneInfo("Asia/Kolkata")
+    for s in slots:
+        s_local = datetime.fromisoformat(s["start_time"]).astimezone(kolkata)
+        e_local = datetime.fromisoformat(s["end_time"]).astimezone(kolkata)
+        start_h = s_local.hour + s_local.minute / 60
+        end_h = e_local.hour + e_local.minute / 60
+        assert start_h >= 7, f"{s_local} starts before 07:00 local"
+        assert end_h <= 22, f"{e_local} ends after 22:00 local"

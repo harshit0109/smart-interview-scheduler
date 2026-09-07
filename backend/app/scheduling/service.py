@@ -8,7 +8,7 @@ availability + live panelist free/busy, normalizes everything into an
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,11 +38,23 @@ from app.scheduling.types import (
     SchedulingEngineError,
     ScoringWeights,
     TimeInterval,
+    WorkingHours,
 )
 
 logger = logging.getLogger("app.scheduling")
 
 READY = "READY_FOR_SCHEDULING"
+
+# Interviewer availability window, in each interviewer's LOCAL timezone
+# (requirements — 7:00 AM to 10:00 PM local). The engine clips generated slots
+# to this per participant per local day; core hours only steer the comfort
+# score toward the middle of the day.
+_AVAILABILITY_WINDOW = WorkingHours(
+    day_start=time(7, 0),
+    day_end=time(22, 0),
+    core_start=time(9, 0),
+    core_end=time(18, 0),
+)
 
 
 def _snapshot(ei: EngineInput) -> dict:
@@ -191,6 +203,7 @@ async def generate(
         constraints=SchedulingConstraints(
             duration_minutes=request.duration_minutes,
             buffer_minutes=request.buffer_minutes,
+            working_hours=_AVAILABILITY_WINDOW,
         ),
         existing_bookings={},  # interview_events arrives in Phase 7 (G1 / D-B)
         weights=ScoringWeights(),
