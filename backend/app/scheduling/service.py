@@ -6,6 +6,7 @@ availability + live panelist free/busy, normalizes everything into an
 `datetime.now(UTC)` enters the system HERE and nowhere in the engine.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, time
@@ -27,6 +28,7 @@ from app.core.errors import (
     NotReadyForSchedulingError,
     PanelistCalendarNotConnectedError,
 )
+from app.core.locks import LockNotAcquired, redis_lock
 from app.core.models import InterviewParticipant, InterviewRequest, User
 from app.scheduling import repository, schemas
 from app.scheduling.engine import generate_recommendations
@@ -105,15 +107,74 @@ async def _participants(
     return list(rows.all())
 
 
+def _run_to_response(run) -> schemas.RecommendationResponse:
+    return schemas.RecommendationResponse(
+        recommendation_run_id=run.id,
+        slots=[
+            schemas.SlotOut(
+                id=s.id,
+                start_time=s.start_time,
+                end_time=s.end_time,
+                total_score=float(s.total_score),
+                score_breakdown=s.score_breakdown,
+                explanation=s.explanation,
+                rank=s.rank,
+            )
+            for s in sorted(run.slots, key=lambda s: s.rank)
+        ],
+    )
+
+
 async def generate(
     db: AsyncSession,
     actor: User,
     request_id: uuid.UUID,
     client: GoogleCalendarClient,
 ) -> schemas.RecommendationResponse:
+    """Idempotent + concurrency-safe. Two near-simultaneous calls (a double-fired
+    client effect, a double-click) must not each create a recommendation run —
+    `book()` rejects any slot that isn't from the *latest* run, which is exactly
+    the "this time is no longer available" the demo hit. The first caller
+    generates under a short Redis lock; a caller that arrives once the request is
+    already RECOMMENDED returns that same run."""
     request = await db.get(InterviewRequest, request_id)
     if request is None:
         raise NotFoundError("interview request not found")
+    if request.status == "RECOMMENDED":
+        existing = await repository.get_latest_run(db, request_id)
+        if existing is not None:
+            return _run_to_response(existing)
+
+    try:
+        async with redis_lock(f"lock:recommend:{request_id}", ttl_seconds=30):
+            return await _generate_locked(db, actor, request_id, client)
+    except LockNotAcquired:
+        # A concurrent call holds the lock and is generating — wait for its run.
+        for _ in range(50):  # ~10s
+            await asyncio.sleep(0.2)
+            fresh = await db.get(InterviewRequest, request_id)
+            await db.refresh(fresh)
+            if fresh.status == "FAILED":
+                raise NoCommonAvailabilityError() from None
+            if fresh.status in ("RECOMMENDED", "BOOKED", "COMPLETED"):
+                run = await repository.get_latest_run(db, request_id)
+                if run is not None:
+                    return _run_to_response(run)
+        raise NotReadyForSchedulingError() from None
+
+
+async def _generate_locked(
+    db: AsyncSession,
+    actor: User,
+    request_id: uuid.UUID,
+    client: GoogleCalendarClient,
+) -> schemas.RecommendationResponse:
+    request = await db.get(InterviewRequest, request_id)
+    await db.refresh(request)
+    if request.status == "RECOMMENDED":
+        existing = await repository.get_latest_run(db, request_id)
+        if existing is not None:
+            return _run_to_response(existing)  # first caller already finished
     if request.status != READY:
         raise NotReadyForSchedulingError()
 
@@ -255,21 +316,7 @@ async def generate(
 
     # Build the response from the PERSISTED rows so callers get real slot ids
     # (POST /book takes one as `recommended_slot_id`).
-    return schemas.RecommendationResponse(
-        recommendation_run_id=run.id,
-        slots=[
-            schemas.SlotOut(
-                id=s.id,
-                start_time=s.start_time,
-                end_time=s.end_time,
-                total_score=float(s.total_score),
-                score_breakdown=s.score_breakdown,
-                explanation=s.explanation,
-                rank=s.rank,
-            )
-            for s in run.slots
-        ],
-    )
+    return _run_to_response(run)
 
 
 async def _fail(

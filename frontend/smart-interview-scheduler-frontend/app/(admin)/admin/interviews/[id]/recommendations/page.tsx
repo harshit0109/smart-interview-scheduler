@@ -136,7 +136,13 @@ export default function AdminRecommendationsPage() {
     }
   };
 
+  // Guard against React 18 StrictMode's double-invoke (and remounts): fire the
+  // recommendation POST once per interview. Two POSTs while the request is still
+  // READY create two runs, and booking a slot from the superseded run fails.
+  const fetchedFor = React.useRef<string | null>(null);
   React.useEffect(() => {
+    if (fetchedFor.current === interviewId) return;
+    fetchedFor.current = interviewId;
     fetchRecommendations();
   }, [interviewId]);
 

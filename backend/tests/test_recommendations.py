@@ -382,3 +382,34 @@ def test_recommendations_zero_panelists_without_admin_calendar_is_honest_424(
     resp = client.post(f"{V1}/interviews/{rid}/recommendations", headers=admin.headers)
     assert resp.status_code == 424
     assert resp.json()["error"]["code"] == "PANELIST_CALENDAR_NOT_CONNECTED"
+
+
+# ------------------------------------------------- idempotent run generation ---
+
+
+def test_repeated_recommendations_reuse_one_run_and_stay_bookable(
+    client, make_user, make_calendar_connection, fake_calendar, db_val
+):
+    """A double-fired POST /recommendations must not create two runs — booking
+    a slot from a superseded run is exactly the 'no longer available' failure."""
+    ctx = _ready_request(client, make_user, make_calendar_connection)
+    fake_calendar.free_busy_result = []
+
+    r1 = client.post(f"{V1}/interviews/{ctx.rid}/recommendations", headers=ctx.admin.headers)
+    r2 = client.post(f"{V1}/interviews/{ctx.rid}/recommendations", headers=ctx.admin.headers)
+    assert r1.status_code == 200 and r2.status_code == 200, (r1.text, r2.text)
+    assert r1.json()["recommendation_run_id"] == r2.json()["recommendation_run_id"]
+
+    assert db_val(
+        "SELECT count(*) FROM recommendation_runs WHERE interview_request_id = :r",
+        {"r": ctx.rid},
+    ) == 1
+
+    # The slot from the (only) run books cleanly — no "no longer current" 409.
+    slot_id = r2.json()["slots"][0]["id"]
+    booked = client.post(
+        f"{V1}/interviews/{ctx.rid}/book",
+        json={"recommended_slot_id": slot_id},
+        headers=ctx.admin.headers,
+    )
+    assert booked.status_code == 201, booked.text
