@@ -4,7 +4,7 @@
      Do NOT duplicate the spec docs — link to them. Keep it under ~2 min to read.
      Frozen specs: requirements.md, IMPLEMENTATION.md, DB_DESIGN.md, API_DESIGN.md, CODING_GUIDELINES.md -->
 
-**Last updated:** 2026-09-07 — Autonomous session. Corrected stale state below, then: (a) surfaced the Phase-9 lifecycle endpoints in the frontend, (b) added a `company` field end-to-end. See **§0 — Autonomous session 2026-09-07** immediately below for the audit and scope decisions.
+**Last updated:** 2026-09-07 — Autonomous sessions. Highlights: `company` field end-to-end; Phase-9 lifecycle surfaced in the frontend; admin Google-Calendar connect flow fixed; **SIMULATED calendar mode** (`CALENDAR_DEV_MODE=1`, set in docker-compose) so recommend → book → confirm works with no Google OAuth and never fakes a Meet link; **interview outcomes + multi-round chain + candidate archive** (migration `0009`); reminder emails carry company/role and use `INTERVIEW_REMINDER_MINUTES_BEFORE`; `INTERVIEW_NO_SHOW_GRACE_MINUTES` gates NO_SHOW. Migration head `0009`. Full backend suite 248 pass + 1 skip. See **§0** for the running audit + scope log.
 
 **Corrected state (the old header was badly out of date):** everything through the invitation phase **is committed AND pushed** to `origin/main`. `main` HEAD before this session = `7e59c26` (`origin/main` = `e444954`; `7e59c26` was the one unpushed commit — token-gated admin self-registration + role-aware auth entry UX, made earlier the same day). Migration head: `0007`. Backend Phases 1–11, frontend Phase 10, Phases A/B/C/C3/C4, and the full invitation phase (backend module + `/invite/[token]` + admin trigger + the UNAVAILABLE/resend fixes) are all live on `origin/main`.
 
@@ -113,9 +113,48 @@ Engineer / Acme Corp". Useful as a judge-demo fixture; delete if unwanted.
 
 **Minor polish noted, not fixed:** candidate/panelist portals show generic
 "Panelist"/"Candidate" instead of names (P10-3: non-ADMIN can't fetch the user
-directory); interview lists/cards don't surface company/title; the
-create-interview success screen still says "invitation delivery is not part of
-this release" (stale — the invitation trigger is right there on the detail page).
+directory); the create-interview success screen still says "invitation delivery
+is not part of this release" (stale — the invitation trigger is right there on
+the detail page); the booked-event hero on the admin detail only renders while
+status is BOOKED, so a COMPLETED interview stops showing its (past) slot + link.
+
+### Session 3 (2026-09-07) — full end-to-end via SIMULATED calendar + outcomes
+
+**Goal met: recommend → book → confirm → outcome → next round now works with no
+Google OAuth, browser-verified.**
+
+- **SIMULATED calendar mode.** `settings.calendar_simulated` = `CALENDAR_DEV_MODE=1`
+  AND no Google client configured (`docker-compose.yml` sets the flag for the
+  local stack; real creds always win and the flag is ignored). Effect:
+  `scheduling/service.py` skips the per-panelist Google-connection requirement
+  and treats panelists as fully available (run snapshot gets
+  `simulated_calendar: true`); `booking/service.py` writes an `interview_events`
+  row with `provider='SIMULATED'`, `calendar_event_id='sim-…'`, `meeting_link=NULL`
+  — **no external call, no fake Meet URL**. The real Google free/busy + event
+  path is untouched (Service layer only — pure engine files not modified;
+  regression coverage in `tests/test_outcomes.py`). Frontend labels a
+  SIMULATED booking "development mode" with an amber note on the missing Meet link.
+- **Outcomes + next rounds (migration `0009`).** `interview_requests` gains
+  `outcome` / `outcome_notes` / `round_number` / `parent_request_id` (self-FK);
+  `interview_events` gains `provider`; `users` gains `archived_at`.
+  `POST /interviews/{id}/outcome` [ADMIN] PASSED/REJECTED/NO_SHOW → BOOKED→COMPLETED
+  (NO_SHOW gated by `INTERVIEW_NO_SHOW_GRACE_MINUTES` after start).
+  `POST /interviews/{id}/next-round` [ADMIN] from COMPLETED+PASSED → child request,
+  company/title carried, `round_number`+1, parent linked.
+  `POST /users/{id}/(un)archive` [ADMIN, CANDIDATE only] — reversible, hidden from
+  pickers, blocked from login, audited. Frontend: `components/shared/OutcomePanel.tsx`
+  on the admin detail page (record outcome, inline next-round form with an
+  interviewer checklist, remove-candidate). Round/outcome badges in the header.
+- **Reminders.** `scripts/send_reminders.py` → `--minutes` (default
+  `INTERVIEW_REMINDER_MINUTES_BEFORE`); REMINDER email now carries
+  company/role/round/time/join-link (loads the parent request).
+- Commits `e308076` (backend) + `c621e0d` (frontend UI). `docker-compose.yml`
+  now passes `CALENDAR_DEV_MODE` / `GOOGLE_CALENDAR_OAUTH_*` / `SENDGRID_API_KEY`
+  / `EMAIL_FROM_ADDRESS` / the two interview-timing vars through from host env.
+- **Still config-dependent (unchanged blockers):** a REAL Google Calendar event
+  + REAL Meet link + REAL confirmation/reminder *email* need
+  `GOOGLE_CALENDAR_OAUTH_CLIENT_ID`/`_SECRET` and `SENDGRID_API_KEY`. Everything
+  else is demoable now.
 
 ---
 
