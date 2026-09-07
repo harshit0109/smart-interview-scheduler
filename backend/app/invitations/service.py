@@ -223,6 +223,7 @@ async def _public_out(db: AsyncSession, row: ParticipantInvitation) -> schemas.I
         requires_account_setup=row.requires_account_setup,
         account_claimed=user.password_hash is not None,
         interview_title=request.title,
+        interview_company=request.company,
         round_type=request.round_type,
         duration_minutes=request.duration_minutes,
     )

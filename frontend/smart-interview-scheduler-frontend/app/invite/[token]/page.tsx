@@ -161,12 +161,18 @@ export default function InvitePage() {
         <Card className="p-6 border-slate-200 shadow-enterprise space-y-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900">{label}</h1>
+            {invitation.interview_company && (
+              <p className="text-xs font-medium text-slate-600 mt-0.5">
+                {invitation.interview_company}
+              </p>
+            )}
             <p className="text-xs text-slate-500 mt-1">
               You&apos;ve been invited as a{" "}
               <span className="font-semibold text-slate-700">
                 {invitation.role === "CANDIDATE" ? "Candidate" : "Panelist"}
               </span>{" "}
-              — {invitation.duration_minutes} minutes.
+              for the {invitation.round_type.toLowerCase()} round —{" "}
+              {invitation.duration_minutes} minutes.
             </p>
           </div>
 

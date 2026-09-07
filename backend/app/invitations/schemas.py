@@ -48,6 +48,7 @@ class InvitationPublicOut(BaseModel):
     requires_account_setup: bool
     account_claimed: bool
     interview_title: str | None
+    interview_company: str | None
     round_type: str
     duration_minutes: int
 

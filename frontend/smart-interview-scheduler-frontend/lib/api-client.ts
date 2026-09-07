@@ -146,8 +146,11 @@ async function request<T>(
   try {
     const res = await fetch(url, { ...options, headers });
 
-    // Handle 401 Unauthorized with single token refresh retry
-    if (res.status === 401 && retry) {
+    // Handle 401 with a single token-refresh retry — but NOT for the auth
+    // endpoints themselves: a 401 from /auth/login is "wrong credentials",
+    // not an expired session, and must surface the backend's real message.
+    const isAuthEndpoint = path.startsWith("/auth/");
+    if (res.status === 401 && retry && !isAuthEndpoint) {
       if (!isRefreshing) {
         isRefreshing = true;
         refreshPromise = refreshAccessToken().finally(() => {

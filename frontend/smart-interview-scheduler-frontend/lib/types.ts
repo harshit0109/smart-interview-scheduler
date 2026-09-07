@@ -233,6 +233,7 @@ export interface InvitationPublic {
   requires_account_setup: boolean;
   account_claimed: boolean;
   interview_title: string | null;
+  interview_company: string | null;
   round_type: RoundType;
   duration_minutes: number;
 }
