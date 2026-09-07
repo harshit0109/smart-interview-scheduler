@@ -231,6 +231,9 @@ interface BackendParticipant {
   user_id: string;
   role_in_interview: "CANDIDATE" | "PANELIST";
   response_status: "PENDING" | "ACCEPTED" | "DECLINED" | "UNAVAILABLE";
+  /** PANELIST-only, ADMIN detail read only: CONNECTED / EXPIRED / REVOKED /
+   * DISCONNECTED, or null when not enriched. */
+  calendar_status?: string | null;
 }
 
 interface BackendInterviewEvent {
@@ -356,7 +359,7 @@ function adaptInterview(
       email: resolveEmail(p.user_id, dir),
       role: "PANELIST",
       timezone: dir[p.user_id]?.timezone,
-      calendar_status: undefined,
+      calendar_status: (p.calendar_status as InterviewParticipant["calendar_status"]) ?? undefined,
       response_status: p.response_status,
     }));
   const candidateParticipant = raw.participants.find(

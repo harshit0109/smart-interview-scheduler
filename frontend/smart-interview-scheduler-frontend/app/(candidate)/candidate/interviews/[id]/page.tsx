@@ -172,15 +172,15 @@ export default function CandidateInterviewDetailPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h3 className="font-bold text-indigo-950 text-base">
-                Recommended Times Found
+                Pick your interview time
               </h3>
               <p className="text-xs text-indigo-900 mt-1">
-                Mathematical matches have been computed. Your recruiter will finalize the booking shortly.
+                These times work for you and every interviewer. Choose one to confirm the booking.
               </p>
             </div>
             <Link href={`/candidate/interviews/${interview.id}/recommendations`}>
               <Button variant="outline" size="md" className="text-xs bg-white text-indigo-900 border-indigo-300">
-                View Recommendations
+                Choose a time
               </Button>
             </Link>
           </div>

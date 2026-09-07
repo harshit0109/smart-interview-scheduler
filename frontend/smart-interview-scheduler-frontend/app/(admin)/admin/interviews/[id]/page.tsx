@@ -381,6 +381,14 @@ export default function AdminInterviewDetailPage() {
                       <CalendarCheck className="w-3 h-3 text-emerald-600" />
                       Calendar Connected
                     </span>
+                  ) : pan.calendar_status === "EXPIRED" || pan.calendar_status === "REVOKED" ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                      Calendar needs reconnect
+                    </span>
+                  ) : pan.calendar_status === "DISCONNECTED" ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-800 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                      Calendar not connected
+                    </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
                       Calendar status unknown
