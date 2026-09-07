@@ -133,6 +133,9 @@ export default function AdminInterviewsListPage() {
                       >
                         {inv.candidate_name}
                       </Link>
+                      <span className="block text-[11px] font-medium text-slate-600">
+                        {[inv.company, inv.title].filter(Boolean).join(" · ") || "No company / role set"}
+                      </span>
                       <span className="text-[11px] text-slate-400">
                         {inv.candidate_email} ({inv.candidate_timezone})
                       </span>
@@ -141,6 +144,7 @@ export default function AdminInterviewsListPage() {
                     <td className="p-4">
                       <span className="font-semibold text-slate-800 capitalize">
                         {inv.round_type.toLowerCase()}
+                        {inv.round_number && inv.round_number > 1 ? ` · Round ${inv.round_number}` : ""}
                       </span>
                       <span className="block text-[11px] text-slate-500">
                         {inv.duration_minutes} mins (+{inv.buffer_minutes}m buffer)
