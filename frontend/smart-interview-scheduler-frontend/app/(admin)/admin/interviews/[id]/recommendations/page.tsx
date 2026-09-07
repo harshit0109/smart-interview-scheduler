@@ -167,13 +167,15 @@ export default function AdminRecommendationsPage() {
 
           <div className="space-y-2">
             <span className="text-xs font-bold uppercase tracking-widest text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-              CONFIRMED & SCHEDULED
+              {bookedEvent.provider === "SIMULATED" ? "BOOKED — DEVELOPMENT MODE" : "CONFIRMED & SCHEDULED"}
             </span>
             <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
               Interview Booked Successfully
             </h2>
             <p className="text-sm text-slate-600 max-w-md mx-auto">
-              Your calendar invitation has been confirmed and synchronized with all participants.
+              {bookedEvent.provider === "SIMULATED"
+                ? "Recorded locally. Google Calendar OAuth isn't configured, so no real calendar event or Google Meet link was created — set GOOGLE_CALENDAR_OAUTH_CLIENT_ID / _SECRET for the real integration."
+                : "Your Google Calendar event has been created and shared with all participants, with a Google Meet link."}
             </p>
           </div>
 

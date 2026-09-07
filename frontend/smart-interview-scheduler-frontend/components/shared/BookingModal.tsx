@@ -169,7 +169,8 @@ export const BookingModal: React.FC<BookingModalProps> = ({
               <div>
                 <p className="text-xs text-slate-500 font-medium">Video Conferencing</p>
                 <p className="font-medium text-workday-blue">
-                  A Google Meet link will be generated automatically
+                  A Google Meet link is generated automatically when Google Calendar
+                  is connected
                 </p>
               </div>
             </div>
