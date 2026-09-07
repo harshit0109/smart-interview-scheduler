@@ -13,6 +13,8 @@ export type InterviewStatus =
   | "CANCELLED"
   | "RESCHEDULING";
 
+export type InterviewOutcome = "PASSED" | "REJECTED" | "NO_SHOW";
+
 export type CalendarStatus = "CONNECTED" | "EXPIRED" | "REVOKED" | "DISCONNECTED";
 
 export interface User {
@@ -104,6 +106,8 @@ export interface InterviewEvent {
   end_time: string;
   calendar_event_id: string;
   meeting_link?: string | null;
+  /** GOOGLE = real event + real Meet link; SIMULATED = dev booking, no link. */
+  provider?: "GOOGLE" | "SIMULATED";
   status: "CONFIRMED" | "CANCELLED";
   created_at?: string;
 }
@@ -121,6 +125,10 @@ export interface InterviewRequest {
   duration_minutes: number;
   buffer_minutes: number;
   status: InterviewStatus;
+  outcome?: InterviewOutcome | null;
+  outcome_notes?: string | null;
+  round_number?: number;
+  parent_request_id?: string | null;
   panelists: InterviewParticipant[];
   created_at: string;
   updated_at?: string;
@@ -142,6 +150,20 @@ export interface CreateInterviewPayload {
 /** Response of POST /interviews/{id}/decline|reschedule|cancel (Phase 9). */
 export interface LifecycleStatusResponse {
   interview_request_status: string;
+}
+
+export interface RecordOutcomePayload {
+  outcome: InterviewOutcome;
+  notes?: string;
+}
+
+export interface NextRoundPayload {
+  round_type: RoundType;
+  duration_minutes: number;
+  buffer_minutes?: number;
+  panelist_ids: string[];
+  title?: string;
+  company?: string;
 }
 
 /** One row of GET /interviews/{id}/audit (ADMIN). */

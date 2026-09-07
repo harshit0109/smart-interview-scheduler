@@ -130,3 +130,35 @@ async def get_interview_audit(
     request_id: uuid.UUID, user: CurrentUser, db: DbDep, page: PageDep
 ) -> Page[schemas.AuditEntryOut]:
     return await lifecycle.get_audit(db, request_id, page)
+
+
+# --------------------------------------------- outcomes + next round -----------
+
+
+@router.post(
+    "/{request_id}/outcome",
+    response_model=schemas.InterviewRequestOut,
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def record_interview_outcome(
+    request_id: uuid.UUID,
+    data: schemas.RecordOutcomeRequest,
+    user: CurrentUser,
+    db: DbDep,
+) -> schemas.InterviewRequestOut:
+    return await lifecycle.record_outcome(db, user, request_id, data.outcome, data.notes)
+
+
+@router.post(
+    "/{request_id}/next-round",
+    response_model=schemas.InterviewRequestOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def create_interview_next_round(
+    request_id: uuid.UUID,
+    data: schemas.NextRoundRequest,
+    user: CurrentUser,
+    db: DbDep,
+) -> schemas.InterviewRequestOut:
+    return await lifecycle.create_next_round(db, user, request_id, data)

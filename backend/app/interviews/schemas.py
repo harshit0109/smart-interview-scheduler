@@ -61,6 +61,10 @@ class InterviewRequestOut(BaseModel):
     duration_minutes: int
     buffer_minutes: int
     status: str
+    outcome: str | None = None
+    outcome_notes: str | None = None
+    round_number: int = 1
+    parent_request_id: uuid.UUID | None = None
     created_at: datetime
     participants: list[ParticipantOut]
     # Latest recommendation run's slots — populated only for ADMIN and the owning
@@ -81,6 +85,30 @@ class LifecycleRequest(BaseModel):
 
 class LifecycleStatusResponse(BaseModel):
     interview_request_status: str
+
+
+Outcome = Literal["PASSED", "REJECTED", "NO_SHOW"]
+
+
+class RecordOutcomeRequest(BaseModel):
+    outcome: Outcome
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class NextRoundRequest(BaseModel):
+    """Advance a PASSED candidate into a fresh round. Company / title default to
+    carrying forward from the completed round; panel + round type are new."""
+    round_type: RoundType
+    duration_minutes: int = Field(gt=0)
+    buffer_minutes: int = Field(default=15, ge=0)
+    panelist_ids: list[uuid.UUID] = Field(min_length=1)
+    title: str | None = Field(default=None, max_length=200)
+    company: str | None = Field(default=None, max_length=200)
+
+    @field_validator("panelist_ids")
+    @classmethod
+    def _dedupe_next(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(v))
 
 
 class AuditEntryOut(BaseModel):

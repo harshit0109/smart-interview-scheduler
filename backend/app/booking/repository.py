@@ -67,6 +67,7 @@ async def insert_interview_event(
     end,
     calendar_event_id: str,
     meeting_link: str | None,
+    provider: str = "GOOGLE",
 ) -> InterviewEvent:
     event = InterviewEvent(
         interview_request_id=interview_request_id,
@@ -74,6 +75,7 @@ async def insert_interview_event(
         end_time=end,
         calendar_event_id=calendar_event_id,
         meeting_link=meeting_link,
+        provider=provider,
         status="CONFIRMED",
     )
     db.add(event)

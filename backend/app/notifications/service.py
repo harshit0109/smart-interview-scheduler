@@ -120,16 +120,39 @@ async def send_lifecycle_notification(
     panelist_emails: list[str],
     reason: str | None,
     client: SendGridClient,
+    title: str | None = None,
+    company: str | None = None,
+    round_type: str | None = None,
 ) -> str:
-    """One DECLINE / RESCHEDULE / CANCELLATION / REMINDER row against `event`."""
+    """One DECLINE / RESCHEDULE / CANCELLATION / REMINDER row against `event`.
+
+    REMINDER carries the full interview context (company / role / round / time /
+    join link) so the recipient can act on it directly; the other notices stay
+    brief because a follow-up with details is coming.
+    """
     subject, phrase = _LIFECYCLE_COPY[notification_type]
-    body = (
-        f"Regarding the interview on {_when(event)}: {phrase}.\n"
-    )
-    if reason:
-        body += f"\nReason given: {reason}\n"
-    if notification_type != "CANCELLATION":
-        body += "\nWe will follow up with a new time shortly.\n"
+
+    if notification_type == "REMINDER":
+        link = event.meeting_link or (
+            "(no video link — SIMULATED booking; Google Calendar not configured)"
+        )
+        lines = ["This is a reminder for your upcoming interview.\n"]
+        if company:
+            lines.append(f"Company: {company}")
+        if title:
+            lines.append(f"Role:  {title}")
+        if round_type:
+            lines.append(f"Round: {round_type.title()}")
+        lines.append(f"When:  {_when(event)}")
+        lines.append(f"Join:  {link}\n")
+        body = "\n".join(lines)
+    else:
+        body = f"Regarding the interview on {_when(event)}: {phrase}.\n"
+        if reason:
+            body += f"\nReason given: {reason}\n"
+        if notification_type != "CANCELLATION":
+            body += "\nWe will follow up with a new time shortly.\n"
+
     msg = EmailMessage(
         to=candidate_email,
         cc=list(panelist_emails),

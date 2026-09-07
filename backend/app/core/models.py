@@ -54,6 +54,12 @@ class User(Base):
     )
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Reversible archive — set when an ADMIN removes a candidate from the active
+    # pipeline. Archived users keep all history; they're just hidden from the
+    # candidate/panelist pickers and blocked from new logins.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -144,6 +150,16 @@ class InterviewRequest(Base):
     title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Hiring company / org this interview is for. Nullable — legacy requests have none.
     company: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Recorded outcome once the interview is done: PASSED / REJECTED / NO_SHOW.
+    outcome: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    outcome_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Multi-round chain: round 1 has no parent; a next round points at the round
+    # it advanced from (migration 0009).
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    parent_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("interview_requests.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -436,6 +452,11 @@ class InterviewEvent(Base):
     )
     calendar_event_id: Mapped[str] = mapped_column(String(255), nullable=False)
     meeting_link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # GOOGLE = real Google Calendar event; SIMULATED = dev booking made with no
+    # Google Calendar OAuth configured (local "sim-" id, no meeting link).
+    provider: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="GOOGLE"
+    )
     status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default="CONFIRMED"
     )

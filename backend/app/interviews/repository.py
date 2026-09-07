@@ -56,12 +56,16 @@ async def create(
     status: str,
     title: str | None = None,
     company: str | None = None,
+    parent_request_id: uuid.UUID | None = None,
+    round_number: int = 1,
 ) -> InterviewRequest:
     request = InterviewRequest(
         candidate_id=candidate_id,
         created_by=created_by,
         title=title,
         company=company,
+        parent_request_id=parent_request_id,
+        round_number=round_number,
         round_type=round_type,
         duration_minutes=duration_minutes,
         buffer_minutes=buffer_minutes,

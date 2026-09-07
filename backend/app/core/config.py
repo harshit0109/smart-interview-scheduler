@@ -46,6 +46,23 @@ class Settings(BaseSettings):
     # Where GET /calendar/callback redirects the browser back to.
     frontend_base_url: str = "http://localhost:3000"
 
+    # DEVELOPMENT calendar/meeting simulation. When Google Calendar OAuth is not
+    # configured (no client id/secret) and this is not a production environment,
+    # scheduling + booking run in a clearly-labelled SIMULATED mode: panelists
+    # are treated as fully available and booking writes an `interview_events` row
+    # with provider='SIMULATED', a local "sim-" id and NO meeting link — it never
+    # fabricates a Google Meet URL. Force it on with CALENDAR_DEV_MODE=1; the
+    # real integration path is untouched and takes over the moment creds are set.
+    calendar_dev_mode: bool = False
+
+    # Reminder lead time for scripts/send_reminders.py — how many minutes before
+    # an interview a REMINDER notification is generated.
+    interview_reminder_minutes_before: int = 15
+    # Grace window after an interview's start time before a missing required
+    # participant may be marked NO_SHOW (operational, admin-driven — the app does
+    # not poll Google Meet presence).
+    interview_no_show_grace_minutes: int = 15
+
     # Booking-confirmation email (Phase 8). Empty API key -> the confirmation is
     # logged and recorded as SIMULATED (requirements.md §5 documented fallback).
     sendgrid_api_key: str = ""
@@ -70,6 +87,26 @@ class Settings(BaseSettings):
     # never stored — only SHA-256(token). This is how long an issued/resent
     # token stays valid before a GET/respond/claim lazily marks it EXPIRED.
     invitation_ttl_hours: int = 168  # 7 days
+
+    @property
+    def google_calendar_configured(self) -> bool:
+        return bool(
+            self.google_calendar_oauth_client_id
+            and self.google_calendar_oauth_client_secret
+        )
+
+    @property
+    def calendar_simulated(self) -> bool:
+        """True ⇒ scheduling/booking use the SIMULATED calendar path.
+
+        Opt-in and explicit: requires `CALENDAR_DEV_MODE=1` AND no real Google
+        Calendar OAuth configured. Real creds always win (the flag is ignored),
+        and with the flag unset the real Google path is used and a missing
+        connection is a hard 424 exactly as before. `docker-compose.yml` sets the
+        flag for the local stack so the full flow is demoable without a Google
+        Cloud project; tests never set it, so they exercise the real path.
+        """
+        return self.calendar_dev_mode and not self.google_calendar_configured
 
 
 settings = Settings()

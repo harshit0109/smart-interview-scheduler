@@ -42,6 +42,18 @@ services:
       # Without this passthrough the token cannot reach the container at all:
       # backend/.dockerignore excludes .env, so a backend/.env never ships.
       ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
+      # Local demo: no Google Calendar OAuth client is configured, so run the
+      # SIMULATED calendar path — scheduling treats panelists as free and booking
+      # writes a provider='SIMULATED' event with NO meeting link (never a fake
+      # Meet URL). Setting GOOGLE_CALENDAR_OAUTH_CLIENT_ID/_SECRET makes the real
+      # Google path take over automatically; this flag is then ignored.
+      CALENDAR_DEV_MODE: ${CALENDAR_DEV_MODE:-1}
+      GOOGLE_CALENDAR_OAUTH_CLIENT_ID: ${GOOGLE_CALENDAR_OAUTH_CLIENT_ID:-}
+      GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET: ${GOOGLE_CALENDAR_OAUTH_CLIENT_SECRET:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@smart-interview-scheduler.example}
+      INTERVIEW_REMINDER_MINUTES_BEFORE: ${INTERVIEW_REMINDER_MINUTES_BEFORE:-15}
+      INTERVIEW_NO_SHOW_GRACE_MINUTES: ${INTERVIEW_NO_SHOW_GRACE_MINUTES:-15}
     ports:
       - "8000:8000"
     depends_on:

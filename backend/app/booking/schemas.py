@@ -17,5 +17,7 @@ class InterviewEventOut(BaseModel):
     end_time: datetime
     calendar_event_id: str
     meeting_link: str | None
+    # GOOGLE (real event + real Meet link) or SIMULATED (dev booking, no link).
+    provider: str = "GOOGLE"
     status: str
     created_at: datetime

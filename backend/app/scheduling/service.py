@@ -18,6 +18,7 @@ from app.calendar import repository as calendar_repository
 from app.calendar import service as calendar_service
 from app.calendar.client import GoogleCalendarClient
 from app.core.audit import record_audit
+from app.core.config import settings
 from app.core.errors import (
     AppError,
     NoCommonAvailabilityError,
@@ -128,25 +129,34 @@ async def generate(
     if not windows:
         return await _fail(db, actor, request, "all_windows_expired")
 
-    conns: dict[uuid.UUID, object] = {}
-    for _p, user in panelists:
-        conn = await calendar_repository.get_by_user(db, user.id)
-        if conn is None:
-            raise PanelistCalendarNotConnectedError(
-                f"Panelist {user.email} has not connected their Google Calendar"
-            )
-        conns[user.id] = await calendar_service.ensure_usable(
-            db, conn, client, panelist_email=user.email
-        )
-
     time_min = min(s for s, _e in windows)
     time_max = max(e for _s, e in windows)
 
+    # SIMULATED calendar path (dev / no Google Calendar OAuth): skip the
+    # per-panelist connection requirement and treat every panelist as fully
+    # available. The run snapshot records `simulated_calendar` so the UI labels
+    # the recommendations honestly. The real Google free/busy path below is
+    # unchanged and resumes the moment OAuth creds are configured.
+    simulated = settings.calendar_simulated
     busy_by_user: dict[uuid.UUID, list] = {}
-    for _p, user in panelists:
-        busy_by_user[user.id] = await calendar_service.get_free_busy(
-            conns[user.id], time_min, time_max, client
-        )
+    if simulated:
+        for _p, user in panelists:
+            busy_by_user[user.id] = []
+    else:
+        conns: dict[uuid.UUID, object] = {}
+        for _p, user in panelists:
+            conn = await calendar_repository.get_by_user(db, user.id)
+            if conn is None:
+                raise PanelistCalendarNotConnectedError(
+                    f"Panelist {user.email} has not connected their Google Calendar"
+                )
+            conns[user.id] = await calendar_service.ensure_usable(
+                db, conn, client, panelist_email=user.email
+            )
+        for _p, user in panelists:
+            busy_by_user[user.id] = await calendar_service.get_free_busy(
+                conns[user.id], time_min, time_max, client
+            )
 
     engine_input = EngineInput(
         reference_time=ref,
@@ -181,11 +191,13 @@ async def generate(
     if not result.slots:
         return await _fail(db, actor, request, "no_common_availability")
 
+    snapshot = _snapshot(engine_input)
+    snapshot["simulated_calendar"] = simulated
     run = await repository.create_run(
         db,
         interview_request_id=request.id,
         algorithm_version=result.algorithm_version,
-        input_snapshot=_snapshot(engine_input),
+        input_snapshot=snapshot,
         slots=[
             {
                 "start_time": s.start_time,

@@ -10,6 +10,7 @@ no distributed transaction. The frozen Phase 5 engine is untouched.
 
 import logging
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,11 +19,16 @@ from app.booking.service import organiser_connection
 from app.calendar import service as calendar_service
 from app.calendar.client import GoogleCalendarClient
 from app.core.audit import record_audit
+from app.core.config import settings
 from app.core.errors import (
     AppError,
     ForbiddenError,
+    InvalidParticipantError,
+    NextRoundNotAllowedError,
+    NoShowGraceActiveError,
     NotBookedError,
     NotFoundError,
+    OutcomeNotAllowedError,
     RequestAlreadyTerminalError,
 )
 from app.core.locks import redis_lock
@@ -63,6 +69,10 @@ async def _cancel_active_event(
     """Delete the Google event and mark the local row CANCELLED. A Google failure
     still cancels locally (user intent is authoritative) and records a
     reconciliation task (D-6). Must be called inside the caller's transaction."""
+    if event.provider == "SIMULATED":
+        # No external calendar event exists — nothing to delete or reconcile.
+        event.status = "CANCELLED"
+        return
     panelists = [(p, u) for p, u in parts if p.role_in_interview == "PANELIST"]
     deleted = False
     try:
@@ -294,3 +304,117 @@ async def get_audit(
         size=page.size,
         total=total,
     )
+
+
+# ------------------------------------------------------ outcome / next round ----
+
+_OUTCOMES = {"PASSED", "REJECTED", "NO_SHOW"}
+
+
+async def record_outcome(
+    db: AsyncSession,
+    actor: User,
+    request_id: uuid.UUID,
+    outcome: str,
+    notes: str | None,
+) -> schemas.InterviewRequestOut:
+    """ADMIN records how a booked interview went. Moves BOOKED -> COMPLETED and
+    stores the outcome. NO_SHOW additionally requires the configurable grace
+    window after the scheduled start to have elapsed (operational, not presence-
+    detected). Idempotent-safe: re-recording on a COMPLETED row just updates the
+    outcome/notes."""
+    request = await _load(db, request_id)
+    if outcome not in _OUTCOMES:
+        raise OutcomeNotAllowedError(f"unknown outcome {outcome!r}")
+    if request.status not in ("BOOKED", "COMPLETED"):
+        raise OutcomeNotAllowedError()
+
+    if outcome == "NO_SHOW":
+        event = await booking_repository.get_confirmed_event(db, request_id)
+        if event is not None:
+            grace = timedelta(minutes=settings.interview_no_show_grace_minutes)
+            if datetime.now(UTC) < event.start_time + grace:
+                raise NoShowGraceActiveError()
+
+    request.outcome = outcome
+    request.outcome_notes = notes
+    request.status = "COMPLETED"
+    await record_audit(
+        db,
+        actor_id=actor.id,
+        actor_role=actor.role,
+        action="INTERVIEW_OUTCOME_RECORDED",
+        entity_type="interview_request",
+        entity_id=request_id,
+        metadata={"outcome": outcome, "round_number": request.round_number},
+    )
+    await db.commit()
+    logger.info(
+        "lifecycle.outcome request_id=%s outcome=%s round=%s",
+        request_id, outcome, request.round_number,
+    )
+    from app.interviews import service as interviews_service
+
+    return interviews_service._to_out(await repository.get(db, request_id))
+
+
+async def create_next_round(
+    db: AsyncSession,
+    actor: User,
+    request_id: uuid.UUID,
+    data: schemas.NextRoundRequest,
+) -> schemas.InterviewRequestOut:
+    """From a COMPLETED + PASSED interview, spin up the next round for the same
+    candidate. Company/title carry forward unless overridden; the panel and round
+    type are chosen fresh. The child points back at the parent (`parent_request_id`)
+    and its `round_number` is parent + 1. History is never mutated."""
+    parent = await _load(db, request_id)
+    if parent.status != "COMPLETED" or parent.outcome != "PASSED":
+        raise NextRoundNotAllowedError()
+
+    found = {u.id: u for u in await repository.get_users(db, list(data.panelist_ids))}
+    missing = set(data.panelist_ids) - found.keys()
+    if missing:
+        raise NotFoundError(
+            f"unknown user id(s): {', '.join(str(m) for m in sorted(missing))}"
+        )
+    wrong = [str(pid) for pid in data.panelist_ids if found[pid].role != "PANELIST"]
+    if wrong:
+        raise InvalidParticipantError(f"not a PANELIST: {', '.join(wrong)}")
+    if parent.candidate_id in data.panelist_ids:
+        raise InvalidParticipantError("the candidate cannot also be a panelist")
+
+    child = await repository.create(
+        db,
+        candidate_id=parent.candidate_id,
+        created_by=actor.id,
+        title=data.title if data.title is not None else parent.title,
+        company=data.company if data.company is not None else parent.company,
+        round_type=data.round_type,
+        duration_minutes=data.duration_minutes,
+        buffer_minutes=data.buffer_minutes,
+        panelist_ids=data.panelist_ids,
+        status="AWAITING_CANDIDATE_AVAILABILITY",
+        parent_request_id=parent.id,
+        round_number=parent.round_number + 1,
+    )
+    await record_audit(
+        db,
+        actor_id=actor.id,
+        actor_role=actor.role,
+        action="NEXT_ROUND_CREATED",
+        entity_type="interview_request",
+        entity_id=child.id,
+        metadata={
+            "parent_request_id": str(parent.id),
+            "round_number": child.round_number,
+        },
+    )
+    await db.commit()
+    logger.info(
+        "lifecycle.next_round parent=%s child=%s round=%s",
+        parent.id, child.id, child.round_number,
+    )
+    from app.interviews import service as interviews_service
+
+    return interviews_service._to_out(await repository.get(db, child.id))

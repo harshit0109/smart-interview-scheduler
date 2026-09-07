@@ -22,6 +22,8 @@ import {
   ClaimAccountPayload,
   LifecycleStatusResponse,
   AuditEntry,
+  RecordOutcomePayload,
+  NextRoundPayload,
 } from "./types";
 
 const API_BASE_URL =
@@ -234,6 +236,7 @@ interface BackendInterviewEvent {
   end_time: string;
   calendar_event_id: string;
   meeting_link: string | null;
+  provider?: "GOOGLE" | "SIMULATED";
   status: string;
   created_at: string;
 }
@@ -248,6 +251,10 @@ interface BackendInterview {
   duration_minutes: number;
   buffer_minutes: number;
   status: InterviewRequest["status"];
+  outcome?: InterviewRequest["outcome"];
+  outcome_notes?: string | null;
+  round_number?: number;
+  parent_request_id?: string | null;
   created_at: string;
   participants: BackendParticipant[];
   recommended_slots?: RecommendedSlot[] | null;
@@ -313,6 +320,7 @@ function adaptEvent(e: BackendInterviewEvent): InterviewEvent {
     end_time: e.end_time,
     calendar_event_id: e.calendar_event_id,
     meeting_link: e.meeting_link,
+    provider: e.provider ?? "GOOGLE",
     status: e.status === "CANCELLED" ? "CANCELLED" : "CONFIRMED",
     created_at: e.created_at,
   };
@@ -364,6 +372,10 @@ function adaptInterview(
     duration_minutes: raw.duration_minutes,
     buffer_minutes: raw.buffer_minutes,
     status: raw.status,
+    outcome: raw.outcome ?? null,
+    outcome_notes: raw.outcome_notes ?? null,
+    round_number: raw.round_number ?? 1,
+    parent_request_id: raw.parent_request_id ?? null,
     panelists,
     created_at: raw.created_at,
     latest_recommendations: raw.recommended_slots ?? null,
@@ -747,6 +759,17 @@ export const usersApi = {
     return request<User[]>("/users?role=PANELIST");
   },
 
+  /** ADMIN-only: archive / restore a CANDIDATE. Reversible; history is kept and
+   * the account is hidden from pickers + blocked from login while archived. */
+  async archive(userId: string): Promise<void> {
+    await request(`/users/${userId}/archive`, { method: "POST" });
+    _directoryCache = null; // the candidate list changed
+  },
+  async unarchive(userId: string): Promise<void> {
+    await request(`/users/${userId}/unarchive`, { method: "POST" });
+    _directoryCache = null;
+  },
+
   /** ADMIN-only: POST /users. Idempotent on (email, role); throws ApiClientError
    * with code ROLE_CONFLICT (422) if the email exists under a different role. */
   async provision(payload: ProvisionUserPayload): Promise<ProvisionedUser> {
@@ -952,6 +975,30 @@ export const interviewsApi = {
     return request<PaginatedResponse<AuditEntry>>(
       `/interviews/${id}/audit?page=${page}&size=${size}`
     );
+  },
+
+  // POST /interviews/{id}/outcome  — ADMIN; PASSED / REJECTED / NO_SHOW.
+  async recordOutcome(id: string, payload: RecordOutcomePayload): Promise<InterviewRequest> {
+    const [raw, dir] = await Promise.all([
+      request<BackendInterview>(`/interviews/${id}/outcome`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+      loadDirectory(),
+    ]);
+    return adaptInterview(raw, dir);
+  },
+
+  // POST /interviews/{id}/next-round  — ADMIN; parent must be COMPLETED + PASSED.
+  async nextRound(id: string, payload: NextRoundPayload): Promise<InterviewRequest> {
+    const [raw, dir] = await Promise.all([
+      request<BackendInterview>(`/interviews/${id}/next-round`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+      loadDirectory(),
+    ]);
+    return adaptInterview(raw, dir);
   },
 };
 

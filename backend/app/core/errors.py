@@ -164,6 +164,24 @@ class RequestAlreadyTerminalError(AppError):
     message = "This interview request is already cancelled or completed."
 
 
+class OutcomeNotAllowedError(AppError):
+    status_code = 409
+    code = "OUTCOME_NOT_ALLOWED"
+    message = "An outcome can only be recorded for a booked interview."
+
+
+class NoShowGraceActiveError(AppError):
+    status_code = 409
+    code = "NO_SHOW_GRACE_ACTIVE"
+    message = "The no-show grace period has not elapsed yet."
+
+
+class NextRoundNotAllowedError(AppError):
+    status_code = 409
+    code = "NEXT_ROUND_NOT_ALLOWED"
+    message = "A next round can only be created from a completed, passed interview."
+
+
 class RoleConflictError(AppError):
     status_code = 422
     code = "ROLE_CONFLICT"

@@ -34,6 +34,10 @@ def _to_out(request: InterviewRequest) -> schemas.InterviewRequestOut:
         duration_minutes=request.duration_minutes,
         buffer_minutes=request.buffer_minutes,
         status=request.status,
+        outcome=request.outcome,
+        outcome_notes=request.outcome_notes,
+        round_number=request.round_number,
+        parent_request_id=request.parent_request_id,
         created_at=request.created_at,
         participants=[
             schemas.ParticipantOut(
@@ -145,6 +149,7 @@ async def get_request(
             end_time=event.end_time,
             calendar_event_id=event.calendar_event_id,
             meeting_link=event.meeting_link,
+            provider=event.provider,
             status=event.status,
             created_at=event.created_at,
         )

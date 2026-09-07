@@ -82,6 +82,27 @@ async def provision_user(
     )
 
 
+@router.post(
+    "/{user_id}/archive",
+    response_model=DirectoryUser,
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def archive_user(user_id: uuid.UUID, db: DbDep, admin: AdminDep) -> "DirectoryUser":
+    """Remove a CANDIDATE from the active pipeline (reversible — history kept)."""
+    u = await service.set_archived(db, actor_id=admin.id, user_id=user_id, archived=True)
+    return DirectoryUser(id=u.id, name=u.name, email=u.email, timezone=u.timezone, role=u.role)
+
+
+@router.post(
+    "/{user_id}/unarchive",
+    response_model=DirectoryUser,
+    dependencies=[Depends(require_role("ADMIN"))],
+)
+async def unarchive_user(user_id: uuid.UUID, db: DbDep, admin: AdminDep) -> "DirectoryUser":
+    u = await service.set_archived(db, actor_id=admin.id, user_id=user_id, archived=False)
+    return DirectoryUser(id=u.id, name=u.name, email=u.email, timezone=u.timezone, role=u.role)
+
+
 @router.get("/me", response_model=MeResponse)
 async def me(user: CurrentUser) -> MeResponse:
     return MeResponse(

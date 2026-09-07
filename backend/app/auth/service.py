@@ -113,8 +113,9 @@ async def bootstrap_admin(
 
 async def login(db: AsyncSession, data: schemas.LoginRequest) -> schemas.TokenPair:
     user = await repository.get_by_email(db, data.email)
-    # Same error whether the email is unknown or the password is wrong.
-    if user is None or user.password_hash is None:
+    # Same error whether the email is unknown, the password is wrong, or the
+    # account has been archived — never leak which.
+    if user is None or user.password_hash is None or user.archived_at is not None:
         raise InvalidCredentialsError()
     if not verify_password(data.password, user.password_hash):
         logger.info("auth.login failed email=%s", data.email)

@@ -16,6 +16,7 @@ from app.calendar import repository as calendar_repository
 from app.calendar import service as calendar_service
 from app.calendar.client import GoogleCalendarClient
 from app.core.audit import record_audit
+from app.core.config import settings
 from app.core.errors import (
     BookingPersistenceFailedError,
     NotFoundError,
@@ -45,6 +46,7 @@ def _to_out(event) -> schemas.InterviewEventOut:
         end_time=event.end_time,
         calendar_event_id=event.calendar_event_id,
         meeting_link=event.meeting_link,
+        provider=event.provider,
         status=event.status,
         created_at=event.created_at,
     )
@@ -106,10 +108,6 @@ async def book(
             round_type = request.round_type
             title = request.title
             company = request.company
-            organiser = await organiser_connection(db, panelists, client)
-            # Capture the token now, while `organiser` is loaded — a later rollback
-            # expires the row and an implicit reload would fail in async context.
-            organiser_token = calendar_service.access_token_of(organiser)
 
             _label = " · ".join(b for b in (company, title) if b)
             summary = f"{request.round_type.title()} interview" + (
@@ -121,15 +119,32 @@ async def book(
             if title:
                 _desc.append(f"Role: {title}")
             _desc.append(f"Round: {request.round_type.title()}")
-            cal = await calendar_service.create_event(  # step 4 — OUTSIDE any DB transaction
-                organiser_token,
-                client,
-                summary=summary,
-                description="\n".join(_desc),
-                start=slot.start_time,
-                end=slot.end_time,
-                attendee_emails=[candidate.email, *(u.email for _p, u in panelists)],
-            )  # step 5 — calendar_event_id + meeting_link
+
+            simulated = settings.calendar_simulated
+            if simulated:
+                # No Google Calendar OAuth configured — record a SIMULATED event:
+                # a local id, NO meeting link. Never fabricates a Google Meet URL.
+                organiser_token: str | None = None
+                cal_event_id = f"sim-{uuid.uuid4().hex[:20]}"
+                cal_meeting_link: str | None = None
+                provider = "SIMULATED"
+            else:
+                organiser = await organiser_connection(db, panelists, client)
+                # Capture the token now, while `organiser` is loaded — a later
+                # rollback expires the row and an implicit reload would fail.
+                organiser_token = calendar_service.access_token_of(organiser)
+                cal = await calendar_service.create_event(  # step 4 — OUTSIDE any DB txn
+                    organiser_token,
+                    client,
+                    summary=summary,
+                    description="\n".join(_desc),
+                    start=slot.start_time,
+                    end=slot.end_time,
+                    attendee_emails=[candidate.email, *(u.email for _p, u in panelists)],
+                )  # step 5 — calendar_event_id + meeting_link
+                cal_event_id = cal.event_id
+                cal_meeting_link = cal.meeting_link
+                provider = "GOOGLE"
 
             try:  # step 6 — Postgres-only transaction
                 event = await repository.insert_interview_event(
@@ -137,8 +152,9 @@ async def book(
                     interview_request_id=request_id,
                     start=slot.start_time,
                     end=slot.end_time,
-                    calendar_event_id=cal.event_id,
-                    meeting_link=cal.meeting_link,
+                    calendar_event_id=cal_event_id,
+                    meeting_link=cal_meeting_link,
+                    provider=provider,
                 )
                 request.status = "BOOKED"
                 slot.is_selected = True
@@ -151,19 +167,22 @@ async def book(
                     entity_id=request_id,
                     metadata={
                         "interview_event_id": str(event.id),
-                        "calendar_event_id": cal.event_id,
+                        "calendar_event_id": cal_event_id,
+                        "provider": provider,
                     },
                 )
                 await db.commit()  # step 7
             except IntegrityError as exc:  # lost the DB-level double-booking race
                 await db.rollback()
-                await _compensate(db, organiser_token, client, cal.event_id, exc)
+                if not simulated:
+                    await _compensate(db, organiser_token, client, cal_event_id, exc)
                 raise SlotNoLongerAvailableError(
                     "this request was booked by someone else"
                 ) from exc
             except Exception as exc:
                 await db.rollback()
-                await _compensate(db, organiser_token, client, cal.event_id, exc)
+                if not simulated:
+                    await _compensate(db, organiser_token, client, cal_event_id, exc)
                 raise BookingPersistenceFailedError() from exc
         # step 8 — lock released on context exit
     except LockNotAcquired:
@@ -172,8 +191,8 @@ async def book(
         ) from None
 
     logger.info(
-        "booking.confirmed request_id=%s event_id=%s calendar_event_id=%s",
-        request_id, event.id, cal.event_id,
+        "booking.confirmed request_id=%s event_id=%s calendar_event_id=%s provider=%s",
+        request_id, event.id, cal_event_id, provider,
     )
 
     # Step 10 of the Core Demo Loop — confirmation. Booking is already durable;
