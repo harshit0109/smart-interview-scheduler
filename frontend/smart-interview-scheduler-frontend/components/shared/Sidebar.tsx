@@ -38,7 +38,7 @@ export const Sidebar: React.FC<{ onCloseMobile?: () => void }> = ({
           { label: "Overview", href: "/admin", icon: LayoutDashboard },
           { label: "All Interviews", href: "/admin/interviews", icon: Users },
           { label: "Create Interview", href: "/admin/interviews/new", icon: PlusCircle },
-          { label: "Google Calendar", href: "/calendar", icon: Calendar },
+          { label: "Google Calendar", href: "/admin/calendar", icon: Calendar },
           { label: "Settings", href: "/admin/settings", icon: Settings },
         ];
       case "PANELIST":

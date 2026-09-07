@@ -29,6 +29,8 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { user, role, calendarStatus, calendarMode, logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = React.useState(false);
+  // Each role's calendar page lives in its own route group / AppShell.
+  const calendarHref = role === "ADMIN" ? "/admin/calendar" : "/panelist/calendar";
 
   return (
     <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
@@ -84,7 +86,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Google Calendar Status pill (Section 70) */}
         {(role === "PANELIST" || role === "ADMIN") && (
           <Link
-            href="/panelist/calendar"
+            href={calendarHref}
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all duration-150",
               calendarStatus === "CONNECTED"
@@ -166,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>My Profile</span>
                   </Link>
                   <Link
-                    href="/panelist/calendar"
+                    href={calendarHref}
                     onClick={() => setDropdownOpen(false)}
                     className="flex items-center gap-2 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 rounded"
                   >
