@@ -79,8 +79,11 @@ export default function CandidateDashboardPage() {
                     </div>
 
                     <h3 className="text-lg font-bold text-slate-900 mt-1">
-                      {inv.round_type} Interview
+                      {inv.title || `${inv.round_type} Interview`}
                     </h3>
+                    {inv.company && (
+                      <p className="text-xs font-medium text-slate-600 mt-0.5">{inv.company}</p>
+                    )}
 
                     <p className="text-xs text-slate-500 mt-0.5">
                       Interview Panel: {inv.panelists.map((p) => p.name).join(", ")}

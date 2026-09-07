@@ -114,7 +114,7 @@ export default function CandidateInterviewDetailPage() {
             </div>
 
             <div>
-              <span className="text-slate-500 font-medium block">Google Meet Video:</span>
+              <span className="text-slate-500 font-medium block">Video Meeting:</span>
               {interview.event.meeting_link ? (
                 <a
                   href={interview.event.meeting_link}
@@ -127,7 +127,11 @@ export default function CandidateInterviewDetailPage() {
                   <ExternalLink className="w-3 h-3 opacity-70" />
                 </a>
               ) : (
-                <p className="text-slate-400 mt-1">Calendar event scheduled without video link.</p>
+                <p className="text-slate-400 mt-1">
+                  {interview.event.provider === "SIMULATED"
+                    ? "The video link will be shared closer to the interview."
+                    : "Calendar event scheduled without video link."}
+                </p>
               )}
             </div>
           </div>

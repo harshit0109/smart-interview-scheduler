@@ -109,6 +109,11 @@ export default function PanelistDashboardPage() {
                     <h3 className="text-base font-bold text-slate-900 mt-0.5">
                       Candidate: {inv.candidate_name}
                     </h3>
+                    {(inv.company || inv.title) && (
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {[inv.company, inv.title].filter(Boolean).join(" · ")}
+                      </p>
+                    )}
                   </div>
                   <StatusBadge status={inv.status} />
                 </div>

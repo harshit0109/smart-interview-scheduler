@@ -15,6 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InterviewTimeline } from "@/components/shared/InterviewTimeline";
 import { LifecycleActions } from "@/components/shared/LifecycleActions";
+import { OutcomePanel } from "@/components/shared/OutcomePanel";
 import { CopyButton } from "@/components/shared/CopyButton";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -184,7 +185,23 @@ export default function AdminInterviewDetailPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          {(interview.round_number ?? 1) > 1 && (
+            <Badge variant="outline">Round {interview.round_number}</Badge>
+          )}
+          {interview.outcome && (
+            <Badge
+              variant={
+                interview.outcome === "PASSED"
+                  ? "success"
+                  : interview.outcome === "REJECTED"
+                  ? "danger"
+                  : "warning"
+              }
+            >
+              {interview.outcome}
+            </Badge>
+          )}
           <StatusBadge status={interview.status} />
         </div>
       </div>
@@ -205,12 +222,29 @@ export default function AdminInterviewDetailPage() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2 text-emerald-900 font-bold text-base">
               <CheckCircle2 className="w-6 h-6 text-emerald-600" />
-              <span>Interview Booked & Google Calendar Confirmed</span>
+              <span>
+                {interview.event.provider === "SIMULATED"
+                  ? "Interview Booked (development mode)"
+                  : "Interview Booked & Google Calendar Confirmed"}
+              </span>
             </div>
             <span className="text-xs font-mono font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
               Event ID: {interview.event.calendar_event_id}
             </span>
           </div>
+
+          {interview.event.provider === "SIMULATED" && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-800 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <span>
+                Google Calendar OAuth isn&apos;t configured, so no real calendar
+                event or Google Meet link was created. Set{" "}
+                <span className="font-mono">GOOGLE_CALENDAR_OAUTH_CLIENT_ID</span> /{" "}
+                <span className="font-mono">_SECRET</span> on the backend to make
+                future bookings create a real event + Meet link for every participant.
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-700 pt-2 border-t border-emerald-200/60">
             <div>
@@ -224,7 +258,9 @@ export default function AdminInterviewDetailPage() {
             </div>
 
             <div>
-              <span className="text-slate-500 font-medium block">Google Meet Video Link:</span>
+              <span className="text-slate-500 font-medium block">
+                {interview.event.provider === "SIMULATED" ? "Video Link:" : "Google Meet Video Link:"}
+              </span>
               {interview.event.meeting_link ? (
                 <div className="mt-1 flex items-center gap-2">
                   <a
@@ -240,7 +276,11 @@ export default function AdminInterviewDetailPage() {
                   <CopyButton textToCopy={interview.event.meeting_link} label="Copy link" />
                 </div>
               ) : (
-                <p className="text-slate-400 mt-1">Calendar event created without video link.</p>
+                <p className="text-slate-400 mt-1">
+                  {interview.event.provider === "SIMULATED"
+                    ? "No video link — development booking (Google Calendar not configured)."
+                    : "Calendar event created without video link."}
+                </p>
               )}
             </div>
           </div>
@@ -415,6 +455,15 @@ export default function AdminInterviewDetailPage() {
         onDone={() => {
           loadInterview();
           loadInvitations();
+          if (auditOpen) loadAudit();
+        }}
+      />
+
+      {/* Outcome, next round, archive candidate */}
+      <OutcomePanel
+        interview={interview}
+        onDone={() => {
+          loadInterview();
           if (auditOpen) loadAudit();
         }}
       />
