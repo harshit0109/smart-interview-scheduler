@@ -69,6 +69,54 @@ REMINDER type via `scripts/send_reminders.py`) does not — it only receives
 the `InterviewEvent`. Wiring company/title into reminders needs the reminder
 script to load the parent request; deferred to keep this session's diff tight.
 
+### Browser QA session 2026-09-07 (live end-to-end walkthrough)
+
+Drove the real product in Chrome as ADMIN → CANDIDATE → PANELIST. **Verified
+working end-to-end:** login (both audience tabs) · admin dashboard/nav ·
+create-interview wizard incl. Company + inline candidate/panelist provisioning ·
+`company`/`title` flow to the interview-detail header · issue invitations →
+per-participant `/invite/<token>` links + honest `SIMULATED (no email service)`
+delivery · candidate Accept · account-claim → auto-login · candidate availability
+submit (tz-aware, DST label) → request goes `READY_FOR_SCHEDULING` · panelist
+portal + "Connect Calendar" prompt · audit-log view · "All Interviews" list +
+status filters · invitation response state (ACCEPTED) reflected on the admin card.
+
+**Hard stop — the demo cannot go past recommendations without Google OAuth
+credentials.** `POST /recommendations` → `424 PANELIST_CALENDAR_NOT_CONNECTED`
+because the engine reads panelist free/busy from Google Calendar and no panelist
+can connect (`GOOGLE_CALENDAR_OAUTH_CLIENT_ID`/`_SECRET` are unset). This is a
+config dependency, not a bug — booking + Meet-link + confirmation email are all
+code-complete and integration-ready behind it.
+
+**Fixes made this session (commits `684aaac`, `825f3b1`):**
+- admin `/calendar` page was a display-only stub (no Connect button); now renders
+  the shared `CalendarConnectionPanel` (also used by `/panelist/calendar`), with
+  the honest "OAuth not configured" state. Dropped a dead "Disconnect" button.
+- `/invite/[token]` showed Accept/Decline/**Unavailable** for everyone; the
+  backend rejects UNAVAILABLE for a candidate invitation, so the button is now
+  panelist-only.
+- admin recommendations page: `PANELIST_CALENDAR_NOT_CONNECTED` now keeps the
+  backend's specific panelist name and adds actionable guidance; also handles
+  `CALENDAR_CONNECTION_REVOKED`/`EXPIRED`/`CALENDAR_SYNC_FAILED`.
+
+**Config state confirmed live:** `GOOGLE_CALENDAR_OAUTH_*` unset (auth URL has an
+empty `client_id`); `SENDGRID_API_KEY` unset (all mail `SIMULATED`);
+`FRONTEND_BASE_URL`/`GOOGLE_CALENDAR_OAUTH_REDIRECT_URI` fall back to the
+`config.py` localhost defaults, which are correct for local dev.
+
+**Dev-DB test data left in place** (`sis`): users `qa-admin@example.com`
+(throwaway ADMIN, pw `QaAdmin123` — proves repeatable token-gated admin
+registration), `jordan.candidate@example.com` (pw `Candidate123`),
+`priya.panelist@example.com` (pw `Panelist123`), `sam.panelist@example.com`
+(passwordless), and one `READY_FOR_SCHEDULING` interview "Senior Backend
+Engineer / Acme Corp". Useful as a judge-demo fixture; delete if unwanted.
+
+**Minor polish noted, not fixed:** candidate/panelist portals show generic
+"Panelist"/"Candidate" instead of names (P10-3: non-ADMIN can't fetch the user
+directory); interview lists/cards don't surface company/title; the
+create-interview success screen still says "invitation delivery is not part of
+this release" (stale — the invitation trigger is right there on the detail page).
+
 ---
 
 ## 1. Project identity
